@@ -1,4 +1,4 @@
-# `src-tauri/` — Aaru-OS system core (Rust)
+# `src-tauri/` — Astra OS system core (Rust)
 
 The authoritative system layer. It owns every stateful decision; the React
 frontend in `../src` is a view over the contracts exposed here through Tauri
@@ -15,7 +15,7 @@ commands.
 | `scheduler/` | Round-robin / FCFS / priority strategies over a virtual multi-core CPU; per-core utilisation and averages. |
 | `memory/` | Frame table, page tables, swap, FIFO/LRU replacement; fault/hit accounting. |
 | `process/` | Process registry (simulated + host-backed) and `host_apps` — resolving and listing installable Windows applications. |
-| `security/` | Argon2 profile login, failed-attempt lockout, per-subtree password locks (Aaru-scoped only). |
+| `security/` | Argon2 profile login, failed-attempt lockout, per-subtree password locks (Astra-scoped only). |
 | `persistence/` | `JsonPersistence` — flushed-temp + backup-swap snapshot writes, corruption quarantine, oversize-file sidelining. |
 | `commands/` | The thin `#[tauri::command]` IPC boundary. No policy lives here. |
 | `kernel/` | Static configuration constants and the `SystemConfig` surface. |
@@ -23,7 +23,7 @@ commands.
 
 ## Contracts
 
-- Commands return `Result<T, AaruError>`; `AaruError` serialises to a plain
+- Commands return `Result<T, AstraError>`; `AstraError` serialises to a plain
   string for the frontend.
 - Virtual vs. host boundaries must stay visible in every response. Host
   destructive actions go to the Recycle Bin and require confirmation.

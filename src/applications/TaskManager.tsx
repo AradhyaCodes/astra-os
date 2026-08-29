@@ -146,7 +146,7 @@ export function TaskManager() {
           </span>
         </div>
         <div className="taskman-legend">
-          <span className="badge badge-sim">SIMULATED</span> Aaru-scheduled
+          <span className="badge badge-sim">SIMULATED</span> Astra-scheduled
           <span className="badge badge-host">HOST</span> Windows-managed
         </div>
         <button type="button" onClick={() => void refresh()}>
@@ -240,7 +240,7 @@ export function TaskManager() {
       {tab === "memory" && memory && (
         <section className="mem-overview" aria-label="Simulated memory">
           <div className="cpu-overview-head">
-            <h3>Aaru Memory · {memory.page_size_mb} MB pages</h3>
+            <h3>Astra Memory · {memory.page_size_mb} MB pages</h3>
             <label className="cpu-algo">
               Replacement
               <select
@@ -311,7 +311,7 @@ export function TaskManager() {
             </p>
           )}
           <p className="cpu-ready">
-            Simulated Aaru RAM is independent of the Windows host machine.
+            Simulated Astra RAM is independent of the Windows host machine.
           </p>
         </section>
       )}
@@ -319,7 +319,7 @@ export function TaskManager() {
       {tab === "processes" && (
         <div className="taskman-scroll">
           <ProcessTable
-            caption="Simulated processes (scheduled + paged by Aaru)"
+            caption="Simulated processes (scheduled + paged by Astra)"
             rows={simulated}
             schedByPid={schedByPid}
             memByPid={memByPid}
@@ -327,7 +327,7 @@ export function TaskManager() {
             onAct={act}
           />
           <ProcessTable
-            caption="Observed host processes (run by Windows — not scheduled or paged by Aaru)"
+            caption="Observed host processes (run by Windows — not scheduled or paged by Astra)"
             rows={host}
             schedByPid={schedByPid}
             memByPid={memByPid}
@@ -346,8 +346,8 @@ export function TaskManager() {
       )}
 
       <footer className="taskman-footer">
-        The Aaru scheduler and memory model cover Aaru processes only. They do not replace
-        or control real Windows scheduling or memory.
+        The Astra scheduler and memory model cover Astra processes only. They do not
+        replace or control real Windows scheduling or memory.
       </footer>
     </div>
   );
@@ -414,7 +414,7 @@ function ProcessTable({
           <tr>
             <td className="taskman-empty" colSpan={10}>
               {hostSection
-                ? "No host processes launched from Aaru."
+                ? "No host processes launched from Astra."
                 : "No simulated processes running."}
             </td>
           </tr>

@@ -61,7 +61,7 @@ export interface MountView {
   available: boolean;
 }
 
-/** A real Windows application Aaru can launch, from the `host_apps` command. */
+/** A real Windows application Astra can launch, from the `host_apps` command. */
 export interface HostAppInfo {
   /** Alias / display name — also the `almanac run <name>` argument. */
   name: string;

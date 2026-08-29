@@ -1,7 +1,7 @@
 //! Almanac line lexer.
 //!
 //! This lexer is intentionally separate from both the host-shell tokeniser
-//! ([`crate::shell::tokenize`]) and the Aaru path parser
+//! ([`crate::shell::tokenize`]) and the Astra path parser
 //! ([`crate::filesystem::path`]).
 //!
 //! It performs exactly one job: split an Almanac command line into
@@ -106,8 +106,8 @@ mod tests {
     #[test]
     fn keeps_path_separators_inside_tokens() {
         assert_eq!(
-            lex("open Documents>Projects>AaruOS"),
-            vec!["open", "Documents>Projects>AaruOS"]
+            lex("open Documents>Projects>AstraOS"),
+            vec!["open", "Documents>Projects>AstraOS"]
         );
     }
 

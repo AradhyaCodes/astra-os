@@ -1,4 +1,4 @@
-use crate::error::AaruError;
+use crate::error::AstraError;
 use crate::filesystem::model::{ResourceId, ResourceType, ROOT_ID};
 use crate::filesystem::path::{normalize_path, split_path};
 use crate::filesystem::{
@@ -6,7 +6,7 @@ use crate::filesystem::{
 };
 use crate::fs_provider::host::{HostDirs, HostEntry};
 use crate::fs_provider::{
-    route, AaruLocation, EntryView, HostFilesystem, HostFilesystemProvider, MountView,
+    route, AstraLocation, EntryView, HostFilesystem, HostFilesystemProvider, MountView,
     ProviderKind, SearchHit, VirtualFilesystemProvider,
 };
 use crate::kernel::SchedulerAlgorithm;
@@ -30,13 +30,13 @@ use zeroize::Zeroizing;
 /// Upper bound on retained command history entries.
 const MAX_HISTORY_ENTRIES: usize = 500;
 
-/// Per-file ceiling for a HOST↔AARU copy. The virtual filesystem is held
+/// Per-file ceiling for a HOST↔ASTRA copy. The virtual filesystem is held
 /// entirely in memory and rewritten to a single JSON document on every
 /// mutation, so a very large file would make every later command slow. Files
 /// above this are skipped and reported.
 pub const MAX_CROSS_COPY_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Outcome of a cross-boundary (HOST↔AARU) copy or transfer.
+/// Outcome of a cross-boundary (HOST↔ASTRA) copy or transfer.
 #[derive(Debug, Default, Clone)]
 pub struct CrossCopySummary {
     pub created_path: String,
@@ -49,7 +49,7 @@ pub struct CrossCopySummary {
 }
 
 impl CrossCopySummary {
-    fn note_skip(&mut self, scope: &str, error: &AaruError) {
+    fn note_skip(&mut self, scope: &str, error: &AstraError) {
         self.skipped += 1;
         if self.skip_details.len() < 20 {
             self.skip_details.push(format!("{scope} — {error}"));
@@ -160,10 +160,10 @@ pub struct SystemState {
     persistence: JsonPersistence,
     /// Approved host mounts and the host filesystem bridge.
     host: HostFilesystem,
-    /// Aaru process table (in-memory only — running process state is never
+    /// Astra process table (in-memory only — running process state is never
     /// restored across a restart).
     processes: ProcessManager,
-    /// Virtual CPU scheduler for simulated Aaru processes (Phase 6). In-memory
+    /// Virtual CPU scheduler for simulated Astra processes (Phase 6). In-memory
     /// only and independent of the real Windows scheduler.
     scheduler: Scheduler,
     /// Simulated paged memory subsystem (Phase 7). In-memory only and fully
@@ -182,16 +182,16 @@ pub struct SystemState {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RunReport {
-    /// A real Windows process Aaru spawned and now tracks.
+    /// A real Windows process Astra spawned and now tracks.
     HostApp { process: PcbView },
     /// A host file / shortcut handed to Windows' default handler (a `.lnk`
     /// chains to its own process, so this is deliberately *not* tracked).
     HostOpen { display: String, real: String },
-    /// A Microsoft Store / MSIX app Aaru already asked the Windows shell to
+    /// A Microsoft Store / MSIX app Astra already asked the Windows shell to
     /// launch. Windows owns the real process, so this is *not* tracked and
     /// there is nothing left for the UI to open.
     HostLaunched { display: String },
-    /// A simulated built-in Aaru app or game.
+    /// A simulated built-in Astra app or game.
     Builtin {
         process: PcbView,
         window: Option<String>,
@@ -274,15 +274,15 @@ impl SystemState {
         self.security.status()
     }
 
-    pub fn require_authentication(&self) -> Result<(), AaruError> {
+    pub fn require_authentication(&self) -> Result<(), AstraError> {
         self.security.require_login()
     }
 
-    pub fn configure_login(&mut self, password: &str) -> Result<AuthenticationStatus, AaruError> {
+    pub fn configure_login(&mut self, password: &str) -> Result<AuthenticationStatus, AstraError> {
         self.transact(|state| state.security.configure_login(password))
     }
 
-    pub fn login(&mut self, password: &str) -> Result<AuthenticationStatus, AaruError> {
+    pub fn login(&mut self, password: &str) -> Result<AuthenticationStatus, AstraError> {
         self.security.login(password)
     }
 
@@ -307,7 +307,7 @@ impl SystemState {
         cwd: String,
         ui_session: serde_json::Value,
         almanac_session: serde_json::Value,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         self.require_authentication()?;
         let mut snapshot = self.snapshot();
         snapshot.hibernate = Some(HibernateSnapshot {
@@ -323,7 +323,7 @@ impl SystemState {
             .map(|_| self.hibernating = true)
     }
 
-    pub fn prepare_restart(&mut self) -> Result<(), AaruError> {
+    pub fn prepare_restart(&mut self) -> Result<(), AstraError> {
         self.require_authentication()?;
         self.processes.shutdown_managed();
         self.scheduler = Scheduler::new();
@@ -331,7 +331,7 @@ impl SystemState {
         self.persist()
     }
 
-    pub fn prepare_shutdown(&mut self) -> Result<(), AaruError> {
+    pub fn prepare_shutdown(&mut self) -> Result<(), AstraError> {
         self.require_authentication()?;
         self.processes.shutdown_managed();
         self.scheduler = Scheduler::new();
@@ -402,7 +402,7 @@ impl SystemState {
     // ------------------------------------------------------------------
 
     /// Canonical `ROOT>…` path for a resolvable path, requiring login.
-    pub fn canonical_path(&self, cwd: &str, path: &str) -> Result<String, AaruError> {
+    pub fn canonical_path(&self, cwd: &str, path: &str) -> Result<String, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         Ok(self.filesystem.resource_path(id))
@@ -411,15 +411,15 @@ impl SystemState {
     /// Validate that a directory can be locked *before* prompting for a
     /// password: it must exist, be a directory, have every ancestor lock
     /// already cleared, and not already be locked.
-    pub fn precheck_lock(&self, cwd: &str, path: &str) -> Result<String, AaruError> {
+    pub fn precheck_lock(&self, cwd: &str, path: &str) -> Result<String, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         if self.filesystem.resource_by_id(id)?.metadata.resource_type != ResourceType::Directory {
-            return Err(AaruError::NotADirectory(self.filesystem.resource_path(id)));
+            return Err(AstraError::NotADirectory(self.filesystem.resource_path(id)));
         }
         self.require_ancestor_locks_excluding(id)?;
         if self.security.is_resource_locked(id) {
-            return Err(AaruError::InvalidArgument(format!(
+            return Err(AstraError::InvalidArgument(format!(
                 "{} is already locked",
                 self.filesystem.resource_path(id)
             )));
@@ -428,12 +428,12 @@ impl SystemState {
     }
 
     /// Validate that a directory can be unlocked before prompting.
-    pub fn precheck_unlock(&self, cwd: &str, path: &str) -> Result<String, AaruError> {
+    pub fn precheck_unlock(&self, cwd: &str, path: &str) -> Result<String, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.require_ancestor_locks_excluding(id)?;
         if !self.security.is_resource_locked(id) {
-            return Err(AaruError::InvalidArgument(format!(
+            return Err(AstraError::InvalidArgument(format!(
                 "{} is not locked",
                 self.filesystem.resource_path(id)
             )));
@@ -444,20 +444,20 @@ impl SystemState {
     /// Directory children for tab completion.
     ///
     /// Returns `(name, is_directory)` pairs. Errors with
-    /// [`AaruError::ResourceAuthenticationRequired`] when the target directory
+    /// [`AstraError::ResourceAuthenticationRequired`] when the target directory
     /// (or an ancestor) is behind an un-cleared lock boundary, so completion
     /// never leaks the contents of a locked tree.
     pub fn completion_children(
         &self,
         cwd: &str,
         relative: &str,
-    ) -> Result<Vec<(String, bool)>, AaruError> {
+    ) -> Result<Vec<(String, bool)>, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, relative)?;
         self.require_lock_boundaries(id)?;
         if self.security.is_resource_locked(id) && self.security.require_boundaries(&[id]).is_err()
         {
-            return Err(AaruError::ResourceAuthenticationRequired(
+            return Err(AstraError::ResourceAuthenticationRequired(
                 self.filesystem.resource_path(id),
             ));
         }
@@ -473,7 +473,7 @@ impl SystemState {
             .collect())
     }
 
-    pub fn root(&self) -> Result<ResourceInfo, AaruError> {
+    pub fn root(&self) -> Result<ResourceInfo, AstraError> {
         self.security.require_login()?;
         self.authorize_path_id(
             ROOT_ID,
@@ -482,24 +482,24 @@ impl SystemState {
         Ok(self.filesystem.root_directory())
     }
 
-    pub fn resolve_path(&self, cwd: &str, path: &str) -> Result<ResourceId, AaruError> {
+    pub fn resolve_path(&self, cwd: &str, path: &str) -> Result<ResourceId, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.authorize_path_id(id, &[AccessRequirement::Execute])?;
         Ok(id)
     }
 
-    pub fn open_directory(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AaruError> {
+    pub fn open_directory(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         if self.filesystem.resource_by_id(id)?.metadata.resource_type != ResourceType::Directory {
-            return Err(AaruError::NotADirectory(self.filesystem.resource_path(id)));
+            return Err(AstraError::NotADirectory(self.filesystem.resource_path(id)));
         }
         self.authorize_path_id(id, &[AccessRequirement::Read, AccessRequirement::Execute])?;
         self.filesystem.resource_info(id)
     }
 
-    pub fn parent_directory(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AaruError> {
+    pub fn parent_directory(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         let parent_id = self
@@ -515,21 +515,21 @@ impl SystemState {
         self.filesystem.resource_info(parent_id)
     }
 
-    pub fn list_directory(&self, cwd: &str, path: &str) -> Result<Vec<ResourceInfo>, AaruError> {
+    pub fn list_directory(&self, cwd: &str, path: &str) -> Result<Vec<ResourceInfo>, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.authorize_path_id(id, &[AccessRequirement::Read, AccessRequirement::Execute])?;
         self.filesystem.list_directory(cwd, path)
     }
 
-    pub fn inspect(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AaruError> {
+    pub fn inspect(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.authorize_path_id(id, &[AccessRequirement::Read])?;
         self.filesystem.resource_info(id)
     }
 
-    pub fn create_directory(&mut self, cwd: &str, path: &str) -> Result<ResourceInfo, AaruError> {
+    pub fn create_directory(&mut self, cwd: &str, path: &str) -> Result<ResourceInfo, AstraError> {
         let parent_id = self.resolve_parent_for_creation(cwd, path)?;
         self.authorize_path_id(
             parent_id,
@@ -543,7 +543,7 @@ impl SystemState {
         cwd: &str,
         path: &str,
         content: &str,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         let parent_id = self.resolve_parent_for_creation(cwd, path)?;
         self.authorize_path_id(
             parent_id,
@@ -557,21 +557,21 @@ impl SystemState {
         cwd: &str,
         path: &str,
         content: &str,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.authorize_path_id(id, &[AccessRequirement::Write])?;
         self.transact(|state| state.filesystem.write_file(cwd, path, content))
     }
 
-    pub fn read_file(&self, cwd: &str, path: &str) -> Result<String, AaruError> {
+    pub fn read_file(&self, cwd: &str, path: &str) -> Result<String, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.authorize_path_id(id, &[AccessRequirement::Read])?;
         self.filesystem.read_file(cwd, path)
     }
 
-    pub fn read_file_bytes(&self, cwd: &str, path: &str) -> Result<Vec<u8>, AaruError> {
+    pub fn read_file_bytes(&self, cwd: &str, path: &str) -> Result<Vec<u8>, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.authorize_path_id(id, &[AccessRequirement::Read])?;
@@ -583,7 +583,7 @@ impl SystemState {
         cwd: &str,
         path: &str,
         data: &[u8],
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         let parent_id = self.resolve_parent_for_creation(cwd, path)?;
         self.authorize_path_id(
             parent_id,
@@ -592,7 +592,7 @@ impl SystemState {
         self.transact(|state| state.filesystem.create_file_bytes(cwd, path, data))
     }
 
-    pub fn create_tree(&mut self, cwd: &str, expression: &str) -> Result<ResourceInfo, AaruError> {
+    pub fn create_tree(&mut self, cwd: &str, expression: &str) -> Result<ResourceInfo, AstraError> {
         self.security.require_login()?;
         let parent_id = self.filesystem.resolve_path(cwd, ".")?;
         self.authorize_path_id(
@@ -607,7 +607,7 @@ impl SystemState {
         cwd: &str,
         path: &str,
         new_name: &str,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.authorize_path_id(id, &[AccessRequirement::Write])?;
@@ -621,7 +621,7 @@ impl SystemState {
         cwd: &str,
         source_path: &str,
         destination_directory: &str,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         self.security.require_login()?;
         let source_id = self.filesystem.resolve_path(cwd, source_path)?;
         let destination_id = self.filesystem.resolve_path(cwd, destination_directory)?;
@@ -643,7 +643,7 @@ impl SystemState {
         cwd: &str,
         source_path: &str,
         destination_directory: &str,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         self.security.require_login()?;
         let source_id = self.filesystem.resolve_path(cwd, source_path)?;
         let destination_id = self.filesystem.resolve_path(cwd, destination_directory)?;
@@ -664,14 +664,14 @@ impl SystemState {
         })
     }
 
-    pub fn delete_preview(&self, cwd: &str, path: &str) -> Result<DeleteSummary, AaruError> {
+    pub fn delete_preview(&self, cwd: &str, path: &str) -> Result<DeleteSummary, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.authorize_subtree(id, AccessRequirement::Read)?;
         self.filesystem.delete_preview(cwd, path)
     }
 
-    pub fn delete_recursive(&mut self, cwd: &str, path: &str) -> Result<DeleteSummary, AaruError> {
+    pub fn delete_recursive(&mut self, cwd: &str, path: &str) -> Result<DeleteSummary, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.authorize_subtree(id, AccessRequirement::Write)?;
@@ -689,10 +689,10 @@ impl SystemState {
         cwd: &str,
         start_path: &str,
         query: &str,
-    ) -> Result<SearchResults, AaruError> {
+    ) -> Result<SearchResults, AstraError> {
         self.security.require_login()?;
         if query.is_empty() {
-            return Err(AaruError::InvalidArgument(
+            return Err(AstraError::InvalidArgument(
                 "search query cannot be empty".to_string(),
             ));
         }
@@ -723,7 +723,7 @@ impl SystemState {
         cwd: &str,
         path: &str,
         permissions: Permissions,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.require_lock_boundaries(id)?;
@@ -740,11 +740,11 @@ impl SystemState {
         cwd: &str,
         path: &str,
         password: &str,
-    ) -> Result<ResourceSecurityInfo, AaruError> {
+    ) -> Result<ResourceSecurityInfo, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         if self.filesystem.resource_by_id(id)?.metadata.resource_type != ResourceType::Directory {
-            return Err(AaruError::NotADirectory(self.filesystem.resource_path(id)));
+            return Err(AstraError::NotADirectory(self.filesystem.resource_path(id)));
         }
         self.require_ancestor_locks_excluding(id)?;
         self.transact(|state| {
@@ -761,7 +761,7 @@ impl SystemState {
         cwd: &str,
         path: &str,
         password: &str,
-    ) -> Result<ResourceAuthenticationStatus, AaruError> {
+    ) -> Result<ResourceAuthenticationStatus, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         let boundaries = self.filesystem.ancestor_ids(id)?;
@@ -787,7 +787,7 @@ impl SystemState {
         cwd: &str,
         path: &str,
         password: &str,
-    ) -> Result<ResourceSecurityInfo, AaruError> {
+    ) -> Result<ResourceSecurityInfo, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.require_ancestor_locks_excluding(id)?;
@@ -804,7 +804,7 @@ impl SystemState {
         &self,
         cwd: &str,
         path: &str,
-    ) -> Result<ResourceSecurityInfo, AaruError> {
+    ) -> Result<ResourceSecurityInfo, AstraError> {
         self.security.require_login()?;
         let id = self.filesystem.resolve_path(cwd, path)?;
         self.authorize_path_id(id, &[AccessRequirement::Read])?;
@@ -815,26 +815,26 @@ impl SystemState {
         self.persistence.path()
     }
 
-    fn resolve_parent_for_creation(&self, cwd: &str, path: &str) -> Result<ResourceId, AaruError> {
+    fn resolve_parent_for_creation(&self, cwd: &str, path: &str) -> Result<ResourceId, AstraError> {
         self.security.require_login()?;
         let canonical = normalize_path(cwd, path)?;
         let (parent_path, _) = split_path(&canonical)?;
         self.filesystem.resolve_path("ROOT", &parent_path)
     }
 
-    fn parent_id(&self, id: ResourceId) -> Result<ResourceId, AaruError> {
+    fn parent_id(&self, id: ResourceId) -> Result<ResourceId, AstraError> {
         self.filesystem
             .resource_by_id(id)?
             .metadata
             .parent
-            .ok_or_else(|| AaruError::PermissionDenied("ROOT cannot be modified".to_string()))
+            .ok_or_else(|| AstraError::PermissionDenied("ROOT cannot be modified".to_string()))
     }
 
     fn authorize_path_id(
         &self,
         id: ResourceId,
         target_requirements: &[AccessRequirement],
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         self.require_lock_boundaries(id)?;
         let ancestors = self.filesystem.ancestor_ids(id)?;
         for ancestor_id in ancestors.iter().take(ancestors.len().saturating_sub(1)) {
@@ -847,7 +847,7 @@ impl SystemState {
         &self,
         id: ResourceId,
         requirement: AccessRequirement,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         self.authorize_path_id(id, &[requirement])?;
         for child_id in self.filesystem.subtree_ids(id)? {
             self.require_lock_boundaries(child_id)?;
@@ -865,24 +865,24 @@ impl SystemState {
         Ok(())
     }
 
-    fn require_lock_boundaries(&self, id: ResourceId) -> Result<(), AaruError> {
+    fn require_lock_boundaries(&self, id: ResourceId) -> Result<(), AstraError> {
         let boundaries = self.filesystem.ancestor_ids(id)?;
         self.security
             .require_boundaries(&boundaries)
             .map_err(|boundary_id| {
-                AaruError::ResourceAuthenticationRequired(
+                AstraError::ResourceAuthenticationRequired(
                     self.filesystem.resource_path(boundary_id),
                 )
             })
     }
 
-    fn require_ancestor_locks_excluding(&self, id: ResourceId) -> Result<(), AaruError> {
+    fn require_ancestor_locks_excluding(&self, id: ResourceId) -> Result<(), AstraError> {
         let mut boundaries = self.filesystem.ancestor_ids(id)?;
         boundaries.pop();
         self.security
             .require_boundaries(&boundaries)
             .map_err(|boundary_id| {
-                AaruError::ResourceAuthenticationRequired(
+                AstraError::ResourceAuthenticationRequired(
                     self.filesystem.resource_path(boundary_id),
                 )
             })
@@ -892,7 +892,7 @@ impl SystemState {
         &self,
         id: ResourceId,
         requirements: &[AccessRequirement],
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         for requirement in requirements {
             if !self.permission_allowed(id, *requirement)? {
                 let permission = match requirement {
@@ -900,7 +900,7 @@ impl SystemState {
                     AccessRequirement::Write => "WRITE",
                     AccessRequirement::Execute => "EXECUTE",
                 };
-                return Err(AaruError::PermissionDenied(format!(
+                return Err(AstraError::PermissionDenied(format!(
                     "{permission} is disabled for {}",
                     self.filesystem.resource_path(id)
                 )));
@@ -913,7 +913,7 @@ impl SystemState {
         &self,
         id: ResourceId,
         requirement: AccessRequirement,
-    ) -> Result<bool, AaruError> {
+    ) -> Result<bool, AstraError> {
         let permissions = &self.filesystem.resource_by_id(id)?.metadata.permissions;
         Ok(match requirement {
             AccessRequirement::Read => permissions.read,
@@ -927,7 +927,7 @@ impl SystemState {
         id: ResourceId,
         query: &str,
         results: &mut SearchResults,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         if self.security.is_resource_locked(id) && self.security.require_boundaries(&[id]).is_err()
         {
             results
@@ -956,7 +956,7 @@ impl SystemState {
         Ok(())
     }
 
-    fn security_info_for_id(&self, id: ResourceId) -> Result<ResourceSecurityInfo, AaruError> {
+    fn security_info_for_id(&self, id: ResourceId) -> Result<ResourceSecurityInfo, AstraError> {
         let pending_lock_boundaries = self
             .filesystem
             .ancestor_ids(id)?
@@ -985,12 +985,12 @@ impl SystemState {
 
     /// Decide which provider a `cwd` + `path` pair addresses. Routing logic
     /// lives only here, never in React.
-    pub fn route(&self, cwd: &str, path: &str) -> Result<AaruLocation, AaruError> {
+    pub fn route(&self, cwd: &str, path: &str) -> Result<AstraLocation, AstraError> {
         self.security.require_login()?;
         route(cwd, path)
     }
 
-    pub fn host_mount_list(&self) -> Result<Vec<MountView>, AaruError> {
+    pub fn host_mount_list(&self) -> Result<Vec<MountView>, AstraError> {
         self.security.require_login()?;
         Ok(self.host.list_mounts())
     }
@@ -999,23 +999,23 @@ impl SystemState {
         &mut self,
         source: &Path,
         requested_alias: Option<&str>,
-    ) -> Result<String, AaruError> {
+    ) -> Result<String, AstraError> {
         self.security.require_login()?;
         self.transact(|state| state.host.mount(source, requested_alias))
     }
 
-    pub fn host_unmount(&mut self, alias: &str) -> Result<(), AaruError> {
+    pub fn host_unmount(&mut self, alias: &str) -> Result<(), AstraError> {
         self.security.require_login()?;
         self.transact(|state| state.host.unmount(alias))
     }
 
     /// Ancestor host-lock boundary check → friendly error path.
-    fn host_require_boundaries(&self, alias: &str, relative: &[String]) -> Result<(), AaruError> {
+    fn host_require_boundaries(&self, alias: &str, relative: &[String]) -> Result<(), AstraError> {
         let ancestor_ids = self.host.ancestor_ids(alias, relative)?;
         self.security
             .require_host_boundaries(&ancestor_ids)
             .map_err(|blocking_id| {
-                AaruError::ResourceAuthenticationRequired(self.host.display_for_id(&blocking_id))
+                AstraError::ResourceAuthenticationRequired(self.host.display_for_id(&blocking_id))
             })
     }
 
@@ -1024,7 +1024,7 @@ impl SystemState {
         alias: &str,
         relative: &[String],
         entry: HostEntry,
-    ) -> Result<EntryView, AaruError> {
+    ) -> Result<EntryView, AstraError> {
         let display_path = if relative.is_empty() {
             format!("HOST>{alias}")
         } else {
@@ -1032,7 +1032,7 @@ impl SystemState {
         };
         let canonical_id = self.host.canonical_id(alias, relative).unwrap_or_default();
         let ancestor_ids = self.host.ancestor_ids(alias, relative).unwrap_or_default();
-        let aaru_locked = self.security.is_host_locked(&canonical_id)
+        let astra_locked = self.security.is_host_locked(&canonical_id)
             || ancestor_ids
                 .iter()
                 .any(|id| self.security.is_host_locked(id));
@@ -1045,7 +1045,7 @@ impl SystemState {
             modified_ms: entry.modified_ms,
             created_ms: entry.created_ms,
             read_only: entry.read_only,
-            aaru_locked,
+            astra_locked,
             host_real_path: self
                 .host
                 .real_path(alias, relative)
@@ -1054,12 +1054,12 @@ impl SystemState {
         })
     }
 
-    pub fn host_open(&self, alias: &str, relative: &[String]) -> Result<EntryView, AaruError> {
+    pub fn host_open(&self, alias: &str, relative: &[String]) -> Result<EntryView, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(alias, relative)?;
         let entry = self.host.entry(alias, relative)?;
         if !entry.is_dir {
-            return Err(AaruError::NotADirectory(format!(
+            return Err(AstraError::NotADirectory(format!(
                 "HOST>{alias}>{}",
                 relative.join(">")
             )));
@@ -1067,7 +1067,11 @@ impl SystemState {
         self.host_view(alias, relative, entry)
     }
 
-    pub fn host_list(&self, alias: &str, relative: &[String]) -> Result<Vec<EntryView>, AaruError> {
+    pub fn host_list(
+        &self,
+        alias: &str,
+        relative: &[String],
+    ) -> Result<Vec<EntryView>, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(alias, relative)?;
         let mut views = Vec::new();
@@ -1079,20 +1083,20 @@ impl SystemState {
         Ok(views)
     }
 
-    pub fn host_inspect(&self, alias: &str, relative: &[String]) -> Result<EntryView, AaruError> {
+    pub fn host_inspect(&self, alias: &str, relative: &[String]) -> Result<EntryView, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(alias, relative)?;
         let entry = self.host.entry(alias, relative)?;
         self.host_view(alias, relative, entry)
     }
 
-    pub fn host_read(&self, alias: &str, relative: &[String]) -> Result<String, AaruError> {
+    pub fn host_read(&self, alias: &str, relative: &[String]) -> Result<String, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(alias, relative)?;
         self.host.read_text(alias, relative)
     }
 
-    pub fn host_read_bytes(&self, alias: &str, relative: &[String]) -> Result<Vec<u8>, AaruError> {
+    pub fn host_read_bytes(&self, alias: &str, relative: &[String]) -> Result<Vec<u8>, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(alias, relative)?;
         self.host.read_bytes(alias, relative)
@@ -1104,7 +1108,7 @@ impl SystemState {
         relative: &[String],
         contents: &str,
         must_exist: bool,
-    ) -> Result<EntryView, AaruError> {
+    ) -> Result<EntryView, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(alias, relative)?;
         let entry = self
@@ -1119,14 +1123,14 @@ impl SystemState {
         relative: &[String],
         data: &[u8],
         must_exist: bool,
-    ) -> Result<EntryView, AaruError> {
+    ) -> Result<EntryView, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(alias, relative)?;
         let entry = self.host.write_bytes(alias, relative, data, must_exist)?;
         self.host_view(alias, relative, entry)
     }
 
-    // ---- cross-boundary bulk copy (HOST ↔ AARU) ----
+    // ---- cross-boundary bulk copy (HOST ↔ ASTRA) ----
 
     /// Recursively copy a host file/tree at `from_rel` into the virtual
     /// directory `dest_dir` (canonical `ROOT>…`). The whole walk runs inside a
@@ -1137,7 +1141,7 @@ impl SystemState {
         from_alias: &str,
         from_rel: &[String],
         dest_dir: &str,
-    ) -> Result<CrossCopySummary, AaruError> {
+    ) -> Result<CrossCopySummary, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(from_alias, from_rel)?;
         let dest_id = self.filesystem.resolve_path("ROOT", dest_dir)?;
@@ -1163,7 +1167,7 @@ impl SystemState {
         rel: &[String],
         dest_dir: &str,
         summary: &mut CrossCopySummary,
-    ) -> Result<String, AaruError> {
+    ) -> Result<String, AstraError> {
         self.host_require_boundaries(alias, rel)?;
         let entry = self.host.entry(alias, rel)?;
         let child = format!("{dest_dir}>{}", entry.name);
@@ -1179,7 +1183,7 @@ impl SystemState {
             }
         } else {
             if entry.size > MAX_CROSS_COPY_FILE_BYTES {
-                return Err(AaruError::InvalidArgument(format!(
+                return Err(AstraError::InvalidArgument(format!(
                     "{:.1} MiB — over the {} MiB per-file cross-copy limit",
                     entry.size as f64 / (1024.0 * 1024.0),
                     MAX_CROSS_COPY_FILE_BYTES / (1024 * 1024),
@@ -1200,13 +1204,13 @@ impl SystemState {
 
     /// Recursively copy the virtual resource at `source` (canonical `ROOT>…`)
     /// into the host directory `to_rel` under `to_alias`. This only mutates the
-    /// host filesystem, so it needs no Aaru-state transaction.
+    /// host filesystem, so it needs no Astra-state transaction.
     pub fn export_virtual_to_host(
         &mut self,
         source: &str,
         to_alias: &str,
         to_rel: &[String],
-    ) -> Result<CrossCopySummary, AaruError> {
+    ) -> Result<CrossCopySummary, AstraError> {
         self.security.require_login()?;
         let source_id = self.filesystem.resolve_path("ROOT", source)?;
         self.authorize_subtree(source_id, AccessRequirement::Read)?;
@@ -1223,7 +1227,7 @@ impl SystemState {
         alias: &str,
         to_rel: &[String],
         summary: &mut CrossCopySummary,
-    ) -> Result<String, AaruError> {
+    ) -> Result<String, AstraError> {
         let info = self.filesystem.inspect("ROOT", source)?;
         let mut child_rel = to_rel.to_vec();
         child_rel.push(info.metadata.name.clone());
@@ -1253,7 +1257,7 @@ impl SystemState {
         &mut self,
         alias: &str,
         relative: &[String],
-    ) -> Result<EntryView, AaruError> {
+    ) -> Result<EntryView, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(alias, relative)?;
         let entry = self.host.create_dir(alias, relative)?;
@@ -1265,7 +1269,7 @@ impl SystemState {
         alias: &str,
         relative: &[String],
         new_name: &str,
-    ) -> Result<EntryView, AaruError> {
+    ) -> Result<EntryView, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(alias, relative)?;
         let entry = self.host.rename(alias, relative, new_name)?;
@@ -1281,7 +1285,7 @@ impl SystemState {
         to_alias: &str,
         to_relative: &[String],
         copy: bool,
-    ) -> Result<EntryView, AaruError> {
+    ) -> Result<EntryView, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(from_alias, from_relative)?;
         self.host_require_boundaries(to_alias, to_relative)?;
@@ -1297,7 +1301,7 @@ impl SystemState {
         &self,
         alias: &str,
         relative: &[String],
-    ) -> Result<(u64, u64), AaruError> {
+    ) -> Result<(u64, u64), AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(alias, relative)?;
         self.host.count_descendants(alias, relative)
@@ -1307,19 +1311,19 @@ impl SystemState {
         &mut self,
         alias: &str,
         relative: &[String],
-    ) -> Result<crate::fs_provider::host::HostDeleteOutcome, AaruError> {
+    ) -> Result<crate::fs_provider::host::HostDeleteOutcome, AstraError> {
         self.security.require_login()?;
         self.host_require_boundaries(alias, relative)?;
         self.host.recycle(alias, relative)
     }
 
-    // ---- host Aaru-level locks (metadata only; no ACL / encryption) ----
+    // ---- host Astra-level locks (metadata only; no ACL / encryption) ----
 
     pub fn host_precheck_lock(
         &self,
         alias: &str,
         relative: &[String],
-    ) -> Result<(String, String), AaruError> {
+    ) -> Result<(String, String), AstraError> {
         self.security.require_login()?;
         // Every ancestor lock except the target itself must already be cleared.
         if relative.is_empty() {
@@ -1329,14 +1333,14 @@ impl SystemState {
         }
         let entry = self.host.entry(alias, relative)?;
         if !entry.is_dir {
-            return Err(AaruError::NotADirectory(format!(
+            return Err(AstraError::NotADirectory(format!(
                 "HOST>{alias}>{}",
                 relative.join(">")
             )));
         }
         let id = self.host.canonical_id(alias, relative)?;
         if self.security.is_host_locked(&id) {
-            return Err(AaruError::InvalidArgument(
+            return Err(AstraError::InvalidArgument(
                 "this host directory is already locked".to_string(),
             ));
         }
@@ -1347,14 +1351,14 @@ impl SystemState {
         &self,
         alias: &str,
         relative: &[String],
-    ) -> Result<(String, String), AaruError> {
+    ) -> Result<(String, String), AstraError> {
         self.security.require_login()?;
         if !relative.is_empty() {
             self.host_require_boundaries(alias, &relative[..relative.len() - 1])?;
         }
         let id = self.host.canonical_id(alias, relative)?;
         if !self.security.is_host_locked(&id) {
-            return Err(AaruError::InvalidArgument(
+            return Err(AstraError::InvalidArgument(
                 "this host directory is not locked".to_string(),
             ));
         }
@@ -1365,7 +1369,7 @@ impl SystemState {
         &mut self,
         canonical_id: &str,
         password: &str,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         self.transact(|state| state.security.add_host_lock(canonical_id, password))
     }
 
@@ -1373,7 +1377,7 @@ impl SystemState {
         &mut self,
         canonical_id: &str,
         password: &str,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         self.transact(|state| state.security.remove_host_lock(canonical_id, password))
     }
 
@@ -1382,7 +1386,7 @@ impl SystemState {
         alias: &str,
         relative: &[String],
         password: &str,
-    ) -> Result<ResourceAuthenticationStatus, AaruError> {
+    ) -> Result<ResourceAuthenticationStatus, AstraError> {
         self.security.require_login()?;
         let ancestor_ids = self.host.ancestor_ids(alias, relative)?;
         self.security
@@ -1406,10 +1410,10 @@ impl SystemState {
 
     /// `almanac lookout` — search the virtual filesystem *and* every mounted
     /// host root, tagging each hit with its origin.
-    pub fn lookout(&self, query: &str) -> Result<LookoutResults, AaruError> {
+    pub fn lookout(&self, query: &str) -> Result<LookoutResults, AstraError> {
         self.security.require_login()?;
         if query.trim().is_empty() {
-            return Err(AaruError::InvalidArgument(
+            return Err(AstraError::InvalidArgument(
                 "search query cannot be empty".to_string(),
             ));
         }
@@ -1432,12 +1436,12 @@ impl SystemState {
     // Phase 5 — application launcher & process manager
     // ==================================================================
 
-    pub fn process_list(&mut self) -> Result<Vec<PcbView>, AaruError> {
+    pub fn process_list(&mut self) -> Result<Vec<PcbView>, AstraError> {
         self.security.require_login()?;
         Ok(self.processes.list())
     }
 
-    pub fn process_terminate(&mut self, pid: Pid) -> Result<PcbView, AaruError> {
+    pub fn process_terminate(&mut self, pid: Pid) -> Result<PcbView, AstraError> {
         self.security.require_login()?;
         let view = self.processes.terminate(pid)?;
         self.scheduler.remove(pid);
@@ -1445,14 +1449,14 @@ impl SystemState {
         Ok(view)
     }
 
-    pub fn process_suspend(&mut self, pid: Pid) -> Result<PcbView, AaruError> {
+    pub fn process_suspend(&mut self, pid: Pid) -> Result<PcbView, AstraError> {
         self.security.require_login()?;
         let view = self.processes.suspend(pid)?;
         self.scheduler.suspend(pid);
         Ok(view)
     }
 
-    pub fn process_resume(&mut self, pid: Pid) -> Result<PcbView, AaruError> {
+    pub fn process_resume(&mut self, pid: Pid) -> Result<PcbView, AstraError> {
         self.security.require_login()?;
         let view = self.processes.resume(pid)?;
         self.scheduler.resume(pid);
@@ -1487,7 +1491,7 @@ impl SystemState {
         }
     }
 
-    pub fn scheduler_snapshot(&self) -> Result<SchedulerSnapshot, AaruError> {
+    pub fn scheduler_snapshot(&self) -> Result<SchedulerSnapshot, AstraError> {
         self.security.require_login()?;
         Ok(self.scheduler.snapshot())
     }
@@ -1495,7 +1499,7 @@ impl SystemState {
     pub fn scheduler_set_algorithm(
         &mut self,
         algorithm: SchedulerAlgorithm,
-    ) -> Result<SchedulerSnapshot, AaruError> {
+    ) -> Result<SchedulerSnapshot, AstraError> {
         self.security.require_login()?;
         self.scheduler.set_algorithm(algorithm);
         Ok(self.scheduler.snapshot())
@@ -1505,7 +1509,7 @@ impl SystemState {
     // Phase 7 — simulated memory subsystem
     // ==================================================================
 
-    pub fn memory_snapshot(&self) -> Result<MemorySnapshot, AaruError> {
+    pub fn memory_snapshot(&self) -> Result<MemorySnapshot, AstraError> {
         self.security.require_login()?;
         Ok(self.memory.snapshot())
     }
@@ -1513,7 +1517,7 @@ impl SystemState {
     pub fn memory_set_policy(
         &mut self,
         policy: ReplacementPolicy,
-    ) -> Result<MemorySnapshot, AaruError> {
+    ) -> Result<MemorySnapshot, AstraError> {
         self.security.require_login()?;
         self.memory.set_policy(policy);
         Ok(self.memory.snapshot())
@@ -1545,17 +1549,17 @@ impl SystemState {
     ///    (`HOST>PublicDesktop>VALORANT.lnk`, or a bare name relative to a host
     ///    `cwd`),
     /// 2. a configured host-app alias / `PATH` / Windows `App Paths`,
-    /// 3. the built-in Aaru registry.
+    /// 3. the built-in Astra registry.
     pub fn run_application(
         &mut self,
         cwd: &str,
         application: &str,
         args: &[String],
-    ) -> Result<RunReport, AaruError> {
+    ) -> Result<RunReport, AstraError> {
         self.security.require_login()?;
 
         // 1. A real file/shortcut living on a mounted host directory.
-        if let Ok(AaruLocation::Host { mount, relative }) = route(cwd, application) {
+        if let Ok(AstraLocation::Host { mount, relative }) = route(cwd, application) {
             if !relative.is_empty() {
                 if let Ok(entry) = self.host.entry(&mount, &relative) {
                     if !entry.is_dir {
@@ -1574,7 +1578,7 @@ impl SystemState {
                     .stdin(Stdio::null())
                     .spawn()
                     .map_err(|error| {
-                        AaruError::HostProcess(format!("could not launch {display}: {error}"))
+                        AstraError::HostProcess(format!("could not launch {display}: {error}"))
                     })?;
                 let process = self.processes.register_host(
                     display.clone(),
@@ -1593,11 +1597,11 @@ impl SystemState {
                     .stdin(Stdio::null())
                     .spawn()
                     .map_err(|error| {
-                        AaruError::HostProcess(format!("could not launch {display}: {error}"))
+                        AstraError::HostProcess(format!("could not launch {display}: {error}"))
                     })?;
                 Ok(RunReport::HostLaunched { display })
             }
-            HostAppResolution::NotInstalled { alias } => Err(AaruError::CommandNotFound(format!(
+            HostAppResolution::NotInstalled { alias } => Err(AstraError::CommandNotFound(format!(
                 "{alias} is a registered application but is not installed (not on PATH or in \
                  Windows App Paths)"
             ))),
@@ -1607,7 +1611,7 @@ impl SystemState {
                     let LaunchReport { process, window } = self
                         .processes
                         .spawn_builtin(def, self.processes.launcher_pid());
-                    // Simulated Aaru apps/games join the virtual CPU's READY
+                    // Simulated Astra apps/games join the virtual CPU's READY
                     // queue; host processes never do.
                     if let Some(class) = ScheduleClass::from_process_type(process.process_type) {
                         self.scheduler.admit(
@@ -1627,9 +1631,9 @@ impl SystemState {
                     }
                     Ok(RunReport::Builtin { process, window })
                 }
-                None => Err(AaruError::Process(format!(
+                None => Err(AstraError::Process(format!(
                     "unknown application '{application}' — not a known host application and not a \
-                     built-in Aaru app"
+                     built-in Astra app"
                 ))),
             },
         }
@@ -1643,7 +1647,7 @@ impl SystemState {
         name: &str,
         real: &Path,
         args: &[String],
-    ) -> Result<RunReport, AaruError> {
+    ) -> Result<RunReport, AstraError> {
         let ext = real
             .extension()
             .and_then(|value| value.to_str())
@@ -1656,7 +1660,7 @@ impl SystemState {
                 .stdin(Stdio::null())
                 .spawn()
                 .map_err(|error| {
-                    AaruError::HostProcess(format!("could not launch {name}: {error}"))
+                    AstraError::HostProcess(format!("could not launch {name}: {error}"))
                 })?;
             let process = self.processes.register_host(
                 name.to_string(),
@@ -1682,7 +1686,7 @@ impl SystemState {
         &mut self,
         application: &str,
         real_path: &str,
-    ) -> Result<PcbView, AaruError> {
+    ) -> Result<PcbView, AstraError> {
         self.security.require_login()?;
         match resolve_host_app(application) {
             HostAppResolution::Found { display, program } => {
@@ -1691,7 +1695,7 @@ impl SystemState {
                     .stdin(Stdio::null())
                     .spawn()
                     .map_err(|error| {
-                        AaruError::HostProcess(format!("could not launch {display}: {error}"))
+                        AstraError::HostProcess(format!("could not launch {display}: {error}"))
                     })?;
                 Ok(self.processes.register_host(
                     display.clone(),
@@ -1703,13 +1707,13 @@ impl SystemState {
                     None,
                 ))
             }
-            HostAppResolution::StoreApp { display, .. } => Err(AaruError::Process(format!(
+            HostAppResolution::StoreApp { display, .. } => Err(AstraError::Process(format!(
                 "{display} is a Microsoft Store app and cannot be handed a file path directly"
             ))),
-            HostAppResolution::NotInstalled { alias } => Err(AaruError::CommandNotFound(format!(
+            HostAppResolution::NotInstalled { alias } => Err(AstraError::CommandNotFound(format!(
                 "{alias} is not installed"
             ))),
-            HostAppResolution::Unknown => Err(AaruError::Process(format!(
+            HostAppResolution::Unknown => Err(AstraError::Process(format!(
                 "'{application}' is not a known application"
             ))),
         }
@@ -1727,14 +1731,14 @@ impl SystemState {
         }
     }
 
-    fn persist(&self) -> Result<(), AaruError> {
+    fn persist(&self) -> Result<(), AstraError> {
         self.persistence.save(&self.snapshot())
     }
 
     fn transact<T>(
         &mut self,
-        operation: impl FnOnce(&mut Self) -> Result<T, AaruError>,
-    ) -> Result<T, AaruError> {
+        operation: impl FnOnce(&mut Self) -> Result<T, AstraError>,
+    ) -> Result<T, AstraError> {
         let previous_filesystem = self.filesystem.clone();
         let previous_security = self.security.clone();
         let previous_settings = self.settings.clone();
@@ -1766,7 +1770,7 @@ impl SystemState {
 }
 
 /// Some host launchers (`npm`, `python`, …) spawn their own child processes
-/// that Windows — not Aaru — manages. We annotate the PCB rather than
+/// that Windows — not Astra — manages. We annotate the PCB rather than
 /// fabricate child entries.
 fn spawns_children_note(program: &str) -> Option<String> {
     const LAUNCHERS: &[&str] = &[
@@ -1781,7 +1785,7 @@ fn spawns_children_note(program: &str) -> Option<String> {
         .trim_end_matches(".cmd")
         .to_ascii_lowercase();
     LAUNCHERS.contains(&base.as_str()).then(|| {
-        "may spawn child processes that Windows manages and Aaru does not track individually"
+        "may spawn child processes that Windows manages and Astra does not track individually"
             .to_string()
     })
 }
@@ -1811,7 +1815,7 @@ mod tests {
 
         assert!(matches!(
             state.open_directory("ROOT", "Projects>Vault>Secret"),
-            Err(AaruError::ResourceAuthenticationRequired(path)) if path == "ROOT>Projects>Vault"
+            Err(AstraError::ResourceAuthenticationRequired(path)) if path == "ROOT>Projects>Vault"
         ));
         let first = state
             .authenticate_resource("ROOT", "Projects>Vault>Secret", "vault-password")
@@ -1832,7 +1836,7 @@ mod tests {
         assert_eq!(parent.remaining_boundaries, 1);
         assert!(matches!(
             state.open_directory("ROOT", "Projects>Vault>Secret"),
-            Err(AaruError::ResourceAuthenticationRequired(path)) if path == "ROOT>Projects>Vault>Secret"
+            Err(AstraError::ResourceAuthenticationRequired(path)) if path == "ROOT>Projects>Vault>Secret"
         ));
         let nested = state
             .authenticate_resource("ROOT", "Projects>Vault>Secret", "secret-password")
@@ -1861,7 +1865,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             state.inspect("ROOT", "Documents"),
-            Err(AaruError::PermissionDenied(_))
+            Err(AstraError::PermissionDenied(_))
         ));
         assert!(!updated.metadata.locked);
         assert!(!updated.metadata.permissions.read);
@@ -1912,7 +1916,7 @@ mod tests {
         reloaded.login("login-password").unwrap();
         assert!(matches!(
             reloaded.read_file("ROOT", "Projects>saved.txt"),
-            Err(AaruError::ResourceAuthenticationRequired(_))
+            Err(AstraError::ResourceAuthenticationRequired(_))
         ));
         reloaded
             .authenticate_resource("ROOT", "Projects", "project-password")
@@ -1943,7 +1947,7 @@ mod tests {
 
         assert!(matches!(
             state.open_directory("ROOT", "Documents>Vault>Protected"),
-            Err(AaruError::ResourceAuthenticationRequired(_))
+            Err(AstraError::ResourceAuthenticationRequired(_))
         ));
         state
             .authenticate_resource("ROOT", "Documents>Vault>Protected", "secret-password")
@@ -1984,7 +1988,7 @@ mod tests {
         // Lock is back — access is gated until the password is supplied.
         assert!(matches!(
             reloaded.host_open("Dev", &["Sealed".to_string()]),
-            Err(AaruError::ResourceAuthenticationRequired(_))
+            Err(AstraError::ResourceAuthenticationRequired(_))
         ));
     }
 
@@ -2008,7 +2012,7 @@ mod tests {
         assert!(!process.simulated);
         assert_eq!(process.parent_pid, Some(2)); // parented to the Almanac launcher
 
-        // Only a PID Aaru tracks can be terminated; unknown PIDs are rejected.
+        // Only a PID Astra tracks can be terminated; unknown PIDs are rejected.
         assert!(state.process_terminate(987654).is_err());
         let killed = state.process_terminate(process.pid).unwrap();
         assert_eq!(format!("{:?}", killed.state), "Terminated");
@@ -2078,23 +2082,23 @@ mod tests {
         loop {
             match state.run_application("ROOT", "Calculator", &[]) {
                 Ok(_) => launched += 1,
-                Err(AaruError::OutOfMemory { .. }) => break,
+                Err(AstraError::OutOfMemory { .. }) => break,
                 Err(other) => panic!("unexpected launch error: {other:?}"),
             }
             assert!(launched < 5000, "simulated memory never ran out");
         }
 
         // The rolled-back launch left no live process behind.
-        let live_aaru_apps = state
+        let live_astra_apps = state
             .process_list()
             .unwrap()
             .into_iter()
             .filter(|p| {
-                p.process_type == ProcessType::AaruApp
+                p.process_type == ProcessType::AstraApp
                     && p.state != crate::process::ProcessState::Terminated
             })
             .count();
-        assert_eq!(live_aaru_apps as u32, launched);
+        assert_eq!(live_astra_apps as u32, launched);
         // And the scheduler is not tracking a process with no address space.
         assert_eq!(
             state.scheduler_snapshot().unwrap().schedulable_count as u32,

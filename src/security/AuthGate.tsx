@@ -88,7 +88,7 @@ export function AuthGate({ children }: AuthGateProps) {
           <span />
         </div>
         <div className="auth-copy">
-          <h1 id="auth-title">Secure this Aaru-OS profile</h1>
+          <h1 id="auth-title">Secure this Astra OS profile</h1>
           <p>
             Create the local password used to enter this profile. It is stored only as an
             Argon2 hash.

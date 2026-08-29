@@ -1,6 +1,6 @@
-# Aaru-OS
+# Astra OS
 
-<img src="public/aaru-logo.png" alt="Aaru-OS logo" width="96" />
+<img src="public/astra-logo.png" alt="Astra OS logo" width="96" />
 
 A Windows-inspired **operating-system simulator** that runs as a real desktop
 application. The graphical desktop is a thin view layer; a Rust system core
@@ -27,7 +27,7 @@ Windows shortcuts, and packaged application icons.
 - [How state is stored](#how-state-is-stored)
 - [Project layout](#project-layout)
 - [Testing & checks](#testing--checks)
-- [What Aaru-OS is *not*](#what-aaru-os-is-not)
+- [What Astra OS is *not*](#what-astra-os-is-not)
 
 ---
 
@@ -39,8 +39,8 @@ Windows shortcuts, and packaged application icons.
 | **Almanac shell** | A single command language for navigation, file operations, process/scheduler/memory inspection, host mounts, and lifecycle. Type `almanac` in the console for the full reference. |
 | **CPU scheduler** | Round-robin / FCFS / priority, switchable at runtime, with per-core utilisation, ready-queue, context-switch counts and wait/turnaround/response averages. |
 | **Memory model** | Simulated RAM, frames, swap and page tables with FIFO or LRU replacement; page-fault / hit counters. Independent of real Windows memory. |
-| **Process registry** | Simulated and host-backed processes share one table. Aaru can terminate processes it launched; suspend / resume applies to simulated processes only. |
-| **Security** | Local profile password (Argon2 hashes only), lockout after repeated failures, and password-locked directory subtrees — inside Aaru only. |
+| **Process registry** | Simulated and host-backed processes share one table. Astra can terminate processes it launched; suspend / resume applies to simulated processes only. |
+| **Security** | Local profile password (Argon2 hashes only), lockout after repeated failures, and password-locked directory subtrees — inside Astra only. |
 | **HOST bridge** | Mount a Windows folder as `HOST>alias` for live in-place read/write; launch installed Windows apps; copy/transfer between `HOST>` and the virtual tree. |
 | **Windows Apps panel** | Detects which known desktop / Microsoft Store apps are installed and launches them (`claude`, `chatgpt`, `vsc`, `antigravity`, `chrome`, …). |
 | **Lifecycle** | Login, logout, hibernate (runtime image), restart, and "kill LapSession" — all from the Start menu or Almanac. |
@@ -73,7 +73,7 @@ window; subsequent runs hot-reload both sides.
 plain browser tab, so system calls will show a recoverable connection error
 there — use `npm run tauri dev` for anything real.
 
-On first launch Aaru-OS asks you to set a **local profile password**. It is
+On first launch Astra OS asks you to set a **local profile password**. It is
 stored only as a salted Argon2 hash.
 
 ---
@@ -104,7 +104,8 @@ so Cargo regenerates the executable's embedded icon resource.
 
 Open the **Almanac** console (Start menu, the taskbar terminal icon, or
 `Ctrl` + `` ` ``) and type `almanac` for the built-in reference. Paths use `>`
-as the separator; `AARU` and `ROOT` both name the virtual root.
+as the separator; `ASTRA` and `ROOT` both name the virtual root.
+The previous `AARU>` and `AARU::` path forms remain accepted for compatibility.
 
 | Command | Purpose |
 |---|---|
@@ -115,10 +116,10 @@ as the separator; `AARU` and `ROOT` both name the virtual root.
 | `rewrite <file> [in <App>]` | Edit an existing file |
 | `destroy <path>` | Delete a subtree (asks first) |
 | `rename <path>>newName` | Rename a resource |
-| `transfer <from> <to>` · `copy <from> <to>` | Move / copy — **HOST ↔ AARU allowed** |
+| `transfer <from> <to>` · `copy <from> <to>` | Move / copy — **HOST ↔ ASTRA allowed** |
 | `lookout <term>` | Search accessible resources |
 | `inspect <path>` | Show resource metadata |
-| `lock <path>` · `unlock <path>` | Password-lock a directory (Aaru-only) |
+| `lock <path>` · `unlock <path>` | Password-lock a directory (Astra-only) |
 | `mount [path]` · `unmount <alias>` · `mounts` | Manage HOST folders |
 | `run <App> [args]` | Launch a built-in app or a real Windows app |
 | `reveal HOST><path>` | Open a host file with its default Windows app |
@@ -161,8 +162,11 @@ reported. Prefer working in place under `HOST>` for anything large.
 Durable state — the virtual filesystem (including binary payloads, base64), its
 metadata, permissions, lock hashes, command history and host-mount records — is
 saved to `state.json` in Tauri's app-data directory
-(`%APPDATA%\com.aaru.os\` on Windows). Writes go through a flushed temp file
+(`%APPDATA%\com.astra.os\` on Windows). Writes go through a flushed temp file
 and a backup swap so an interrupted write can recover.
+
+On the first Astra OS launch, an existing `%APPDATA%\com.aaru.os\state.json`
+profile is copied into the new app-data directory if Astra has no state yet.
 
 Login sessions, failed-attempt counters and authenticated lock boundaries are
 **process-local** and deliberately do not survive a restart.
@@ -214,17 +218,17 @@ cargo fmt   --manifest-path src-tauri/Cargo.toml -- --check
 
 ---
 
-## What Aaru-OS is *not*
+## What Astra OS is *not*
 
 - It does **not** encrypt, hide, or change permissions on real Windows files.
-  An Aaru "lock" only gates access inside Aaru-OS.
+  An Astra "lock" only gates access inside Astra OS.
 - Mounted host resources are real. `destroy` previews the affected items, asks
   for confirmation, and moves them to the Windows Recycle Bin.
 - Cross-boundary `transfer` copies first and removes the source only when no
   entries were skipped. A `HOST>` source is moved to the Recycle Bin without a
   separate confirmation prompt.
 - The scheduler, memory and process simulation are teaching models. Tracked
-  host processes are *observed* — Windows schedules them, not Aaru.
+  host processes are *observed* — Windows schedules them, not Astra.
 
 ---
 

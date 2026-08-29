@@ -7,7 +7,7 @@ interface BootScreenProps {
 }
 
 const FALLBACK_CHECK: BootCheck = {
-  name: "Aaru system core",
+  name: "Astra system core",
   detail: "Tauri backend did not respond",
   ok: false,
 };
@@ -52,14 +52,14 @@ export function BootScreen({ children }: BootScreenProps) {
       <div className="boot-terminal">
         <pre
           className="boot-mark"
-          aria-label="Aaru OS"
+          aria-label="Astra OS"
         >{`############################################
 #                                          #
 #              A  A  R  U                  #
 #                 O  S                     #
 #                                          #
 ############################################`}</pre>
-        <div className="boot-version">AARU SYSTEM CORE v{report?.version ?? "0.1"}</div>
+        <div className="boot-version">ASTRA SYSTEM CORE v{report?.version ?? "0.1"}</div>
         <div className="boot-divider" />
         <div className="boot-checks">
           {!report && (
@@ -75,7 +75,7 @@ export function BootScreen({ children }: BootScreenProps) {
           ))}
         </div>
         {report?.resumed && (
-          <p className="boot-resume">HIBERNATE IMAGE FOUND — RESTORING AARU RUNTIME</p>
+          <p className="boot-resume">HIBERNATE IMAGE FOUND — RESTORING ASTRA RUNTIME</p>
         )}
         <div className="boot-cursor" aria-hidden="true" />
       </div>

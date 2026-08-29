@@ -1,12 +1,12 @@
-//! Aaru-OS — Filesystem provider abstraction (Phase 4).
+//! Astra OS — Filesystem provider abstraction (Phase 4).
 //!
 //! ```text
 //! FilesystemProvider
-//! ├── VirtualFilesystemProvider   (the in-memory Aaru filesystem)
+//! ├── VirtualFilesystemProvider   (the in-memory Astra filesystem)
 //! └── HostFilesystemProvider      (selected, explicitly mounted Windows folders)
 //! ```
 //!
-//! Aaru virtual paths and Windows host paths stay logically separate:
+//! Astra virtual paths and Windows host paths stay logically separate:
 //!
 //! * `Documents>Projects`            → [`VirtualFilesystemProvider`]
 //! * `HOST>Documents>Report.docx`    → [`HostFilesystemProvider`]
@@ -23,4 +23,4 @@ pub use providers::{
     EntryView, FilesystemProvider, HostFilesystemProvider, ProviderKind, SearchHit,
     VirtualFilesystemProvider,
 };
-pub use router::{route, AaruLocation};
+pub use router::{route, AstraLocation};

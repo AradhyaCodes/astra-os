@@ -191,14 +191,14 @@ export function Almanac({
           void onLogout();
           break;
         case "shutdown":
-          localStorage.removeItem("aaru-hibernate-ui");
+          localStorage.removeItem("astra-hibernate-ui");
           setHalted(true);
-          pushLine("SYSTEM", "Aaru-OS is shutting down…");
+          pushLine("SYSTEM", "Astra OS is shutting down…");
           break;
         case "restart":
-          localStorage.removeItem("aaru-hibernate-ui");
+          localStorage.removeItem("astra-hibernate-ui");
           setHalted(true);
-          pushLine("SYSTEM", "Aaru-OS is restarting…");
+          pushLine("SYSTEM", "Astra OS is restarting…");
           break;
         case "hibernate":
           void persistHibernateSession();
@@ -277,9 +277,9 @@ export function Almanac({
         },
         almanacSession: { cwd, history },
       });
-      localStorage.setItem("aaru-hibernate-ui", "saved");
+      localStorage.setItem("astra-hibernate-ui", "saved");
       pushLine("SYSTEM", "hibernate image committed — click the sleep screen to resume");
-      window.dispatchEvent(new Event("aaru:hibernate"));
+      window.dispatchEvent(new Event("astra:hibernate"));
     } catch (error) {
       pushLine("ERROR", `hibernate failed: ${readError(error)}`);
     }
@@ -403,8 +403,8 @@ export function Almanac({
       const command = (event as CustomEvent<string>).detail;
       if (command) void runLine(command);
     };
-    window.addEventListener("aaru:command", runExternal);
-    return () => window.removeEventListener("aaru:command", runExternal);
+    window.addEventListener("astra:command", runExternal);
+    return () => window.removeEventListener("astra:command", runExternal);
   }, [acceptExternalCommands, runLine]);
 
   return (
@@ -432,7 +432,7 @@ export function Almanac({
           <div className="almanac-empty">
             {authRequired
               ? "LapSession locked. Enter the login password below; plaintext is never echoed or stored."
-              : "Aaru command interface ready. Type “almanac” for native commands; other input falls back to the host shell."}
+              : "Astra command interface ready. Type “almanac” for native commands; other input falls back to the host shell."}
           </div>
         )}
         {history.map((entry, index) =>
@@ -476,9 +476,9 @@ export function Almanac({
 function formatPrompt(cwd: string): string {
   if (cwd.startsWith("HOST")) {
     const tail = cwd.slice(4).replace(/^>/, "");
-    return `AARU::HOST>${tail ? `${tail}>` : ""}`;
+    return `ASTRA::HOST>${tail ? `${tail}>` : ""}`;
   }
-  return `AARU::${cwd}>`;
+  return `ASTRA::${cwd}>`;
 }
 
 function validHistory(value: unknown): HistoryEntry[] {

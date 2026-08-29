@@ -1,4 +1,4 @@
-//! Pluggable scheduling policies for the Aaru-OS virtual CPU.
+//! Pluggable scheduling policies for the Astra OS virtual CPU.
 //!
 //! The mechanical tick loop in [`super::Scheduler`] is identical for every
 //! algorithm: age WAITING jobs, service the running cores, then fill idle cores

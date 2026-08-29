@@ -1,23 +1,23 @@
 //! Token stream → [`AlmanacCommand`].
 //!
-//! Parser errors are always [`AaruError::AlmanacParse`] so the engine can label
+//! Parser errors are always [`AstraError::AlmanacParse`] so the engine can label
 //! them `[ERROR] almanac: …` and callers can tell them apart from a host
 //! `command not found`.
 
 use super::ast::{AlmanacCommand, EditorTarget};
 use super::lexer::{lex, split_unescaped_gt};
-use crate::error::AaruError;
+use crate::error::AstraError;
 use crate::memory::parse_replacement_policy;
 use crate::scheduler::parse_algorithm;
 
 /// Parse a full Almanac line *including* the leading `almanac` keyword.
-pub fn parse_line(line: &str) -> Result<AlmanacCommand, AaruError> {
+pub fn parse_line(line: &str) -> Result<AlmanacCommand, AstraError> {
     let tokens = lex(line);
     let mut tokens = tokens.as_slice();
     match tokens.split_first() {
         Some((first, rest)) if first == super::lexer::ALMANAC_KEYWORD => tokens = rest,
         _ => {
-            return Err(AaruError::AlmanacParse(
+            return Err(AstraError::AlmanacParse(
                 "expected an 'almanac …' command".to_string(),
             ))
         }
@@ -26,7 +26,7 @@ pub fn parse_line(line: &str) -> Result<AlmanacCommand, AaruError> {
 }
 
 /// Parse the tokens that follow the `almanac` keyword.
-pub fn parse_tokens(tokens: &[String]) -> Result<AlmanacCommand, AaruError> {
+pub fn parse_tokens(tokens: &[String]) -> Result<AlmanacCommand, AstraError> {
     let Some((verb, args)) = tokens.split_first() else {
         return Ok(AlmanacCommand::Help);
     };
@@ -101,7 +101,7 @@ pub fn parse_tokens(tokens: &[String]) -> Result<AlmanacCommand, AaruError> {
             [path] => Ok(AlmanacCommand::Mount {
                 path: Some(path.clone()),
             }),
-            _ => Err(AaruError::AlmanacParse(
+            _ => Err(AstraError::AlmanacParse(
                 "mount takes no argument (opens a picker) or one Windows path".to_string(),
             )),
         },
@@ -148,8 +148,8 @@ pub fn parse_tokens(tokens: &[String]) -> Result<AlmanacCommand, AaruError> {
         }
         "kill" => match args {
             [target] if target == "lapsession" => Ok(AlmanacCommand::KillLapsession),
-            _ => Err(AaruError::AlmanacParse(
-                "did you mean 'almanac kill lapsession'? (this shuts Aaru-OS down)".to_string(),
+            _ => Err(AstraError::AlmanacParse(
+                "did you mean 'almanac kill lapsession'? (this shuts Astra OS down)".to_string(),
             )),
         },
         "hibernate" => {
@@ -160,13 +160,13 @@ pub fn parse_tokens(tokens: &[String]) -> Result<AlmanacCommand, AaruError> {
             no_args(verb, args)?;
             Ok(AlmanacCommand::Restart)
         }
-        other => Err(AaruError::AlmanacParse(format!(
+        other => Err(AstraError::AlmanacParse(format!(
             "unknown command '{other}'. Type 'almanac' for the command reference"
         ))),
     }
 }
 
-fn parse_scheduler(args: &[String]) -> Result<AlmanacCommand, AaruError> {
+fn parse_scheduler(args: &[String]) -> Result<AlmanacCommand, AstraError> {
     match args {
         [] => Ok(AlmanacCommand::Scheduler),
         [keyword, algorithm]
@@ -185,7 +185,7 @@ fn parse_scheduler(args: &[String]) -> Result<AlmanacCommand, AaruError> {
                 .ok()
                 .filter(|n| *n >= 1)
                 .ok_or_else(|| {
-                    AaruError::AlmanacParse(format!(
+                    AstraError::AlmanacParse(format!(
                         "scheduler tick expects a positive whole number, got '{count}'"
                     ))
                 })?;
@@ -193,13 +193,13 @@ fn parse_scheduler(args: &[String]) -> Result<AlmanacCommand, AaruError> {
                 ticks: ticks.min(100_000),
             })
         }
-        _ => Err(AaruError::AlmanacParse(
+        _ => Err(AstraError::AlmanacParse(
             "usage: almanac scheduler [change <RR|FCFS|Priority>] | [tick <n>]".to_string(),
         )),
     }
 }
 
-fn parse_memory(args: &[String]) -> Result<AlmanacCommand, AaruError> {
+fn parse_memory(args: &[String]) -> Result<AlmanacCommand, AstraError> {
     match args {
         [] => Ok(AlmanacCommand::Memory),
         [keyword, policy]
@@ -210,24 +210,24 @@ fn parse_memory(args: &[String]) -> Result<AlmanacCommand, AaruError> {
             parse_replacement_policy(policy)
                 .map(|policy| AlmanacCommand::MemorySetPolicy { policy })
                 .ok_or_else(|| {
-                    AaruError::AlmanacParse(format!(
+                    AstraError::AlmanacParse(format!(
                         "unknown replacement policy '{policy}' — use FIFO or LRU"
                     ))
                 })
         }
-        _ => Err(AaruError::AlmanacParse(
+        _ => Err(AstraError::AlmanacParse(
             "usage: almanac memory [policy <FIFO|LRU>]".to_string(),
         )),
     }
 }
 
-fn parse_rename(args: &[String]) -> Result<AlmanacCommand, AaruError> {
+fn parse_rename(args: &[String]) -> Result<AlmanacCommand, AstraError> {
     match args {
         // `almanac rename originalPath>newName`
         [combined] => {
             let mut segments = split_unescaped_gt(combined);
             if segments.len() < 2 {
-                return Err(AaruError::AlmanacParse(
+                return Err(AstraError::AlmanacParse(
                     "rename expects originalName>newName (for nested resources: \
                      Parent>Child>newName)"
                         .to_string(),
@@ -236,7 +236,7 @@ fn parse_rename(args: &[String]) -> Result<AlmanacCommand, AaruError> {
             let new_name = segments.pop().unwrap();
             let path = segments.join(">");
             if path.trim().is_empty() || new_name.trim().is_empty() {
-                return Err(AaruError::AlmanacParse(
+                return Err(AstraError::AlmanacParse(
                     "rename expects a non-empty original path and new name".to_string(),
                 ));
             }
@@ -247,68 +247,68 @@ fn parse_rename(args: &[String]) -> Result<AlmanacCommand, AaruError> {
             path: path.clone(),
             new_name: new_name.clone(),
         }),
-        _ => Err(AaruError::AlmanacParse(
+        _ => Err(AstraError::AlmanacParse(
             "rename expects originalName>newName".to_string(),
         )),
     }
 }
 
-fn editor_form(verb: &str, args: &[String]) -> Result<(String, EditorTarget), AaruError> {
+fn editor_form(verb: &str, args: &[String]) -> Result<(String, EditorTarget), AstraError> {
     match args {
         [path] => Ok((path.clone(), EditorTarget::None)),
         [path, keyword, app] if keyword == "in" => {
             Ok((path.clone(), EditorTarget::App(app.clone())))
         }
         [] => Err(missing(verb, "a file path")),
-        _ => Err(AaruError::AlmanacParse(format!(
+        _ => Err(AstraError::AlmanacParse(format!(
             "{verb} expects '<file>' or '<file> in <Editor>'"
         ))),
     }
 }
 
-fn single_path(verb: &str, args: &[String]) -> Result<String, AaruError> {
+fn single_path(verb: &str, args: &[String]) -> Result<String, AstraError> {
     match args {
         [path] => Ok(path.clone()),
         [] => Err(missing(verb, "a path")),
-        _ => Err(AaruError::AlmanacParse(format!(
-            "{verb} expects exactly one path (Aaru paths use '>', not spaces)"
+        _ => Err(AstraError::AlmanacParse(format!(
+            "{verb} expects exactly one path (Astra paths use '>', not spaces)"
         ))),
     }
 }
 
-fn two_paths(verb: &str, args: &[String]) -> Result<(String, String), AaruError> {
+fn two_paths(verb: &str, args: &[String]) -> Result<(String, String), AstraError> {
     match args {
         [from, to] => Ok((from.clone(), to.clone())),
         // A natural-language "to" separator is also accepted: `copy X to Y`.
         [from, separator, to] if separator.eq_ignore_ascii_case("to") => {
             Ok((from.clone(), to.clone()))
         }
-        _ => Err(AaruError::AlmanacParse(format!(
-            "{verb} expects '<from> <to>' or '<from> to <to>' (Aaru paths use '>', not spaces)"
+        _ => Err(AstraError::AlmanacParse(format!(
+            "{verb} expects '<from> <to>' or '<from> to <to>' (Astra paths use '>', not spaces)"
         ))),
     }
 }
 
-fn no_args(verb: &str, args: &[String]) -> Result<(), AaruError> {
+fn no_args(verb: &str, args: &[String]) -> Result<(), AstraError> {
     if args.is_empty() {
         Ok(())
     } else {
-        Err(AaruError::AlmanacParse(format!(
+        Err(AstraError::AlmanacParse(format!(
             "{verb} does not take any arguments"
         )))
     }
 }
 
-fn missing(verb: &str, what: &str) -> AaruError {
-    AaruError::AlmanacParse(format!("{verb} requires {what}"))
+fn missing(verb: &str, what: &str) -> AstraError {
+    AstraError::AlmanacParse(format!("{verb} requires {what}"))
 }
 
-fn pid_arg(verb: &str, args: &[String]) -> Result<u32, AaruError> {
+fn pid_arg(verb: &str, args: &[String]) -> Result<u32, AstraError> {
     match args {
         [pid] => pid.parse::<u32>().map_err(|_| {
-            AaruError::AlmanacParse(format!("{verb} expects a numeric Aaru PID, got '{pid}'"))
+            AstraError::AlmanacParse(format!("{verb} expects a numeric Astra PID, got '{pid}'"))
         }),
-        _ => Err(missing(verb, "an Aaru PID (see 'almanac process')")),
+        _ => Err(missing(verb, "an Astra PID (see 'almanac process')")),
     }
 }
 
@@ -316,7 +316,7 @@ fn pid_arg(verb: &str, args: &[String]) -> Result<u32, AaruError> {
 mod tests {
     use super::*;
 
-    fn parse(line: &str) -> Result<AlmanacCommand, AaruError> {
+    fn parse(line: &str) -> Result<AlmanacCommand, AstraError> {
         parse_line(line)
     }
 
@@ -537,7 +537,7 @@ mod tests {
         assert!(parse("almanac teleport somewhere").is_err());
         assert!(matches!(
             parse("almanac teleport x"),
-            Err(AaruError::AlmanacParse(_))
+            Err(AstraError::AlmanacParse(_))
         ));
     }
 

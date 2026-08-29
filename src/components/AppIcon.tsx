@@ -1,7 +1,7 @@
 import type { ReactElement, SVGProps } from "react";
 
 export type IconName =
-  | "aaru"
+  | "astra"
   | "terminal"
   | "folder"
   | "download"
@@ -28,7 +28,7 @@ interface AppIconProps extends SVGProps<SVGSVGElement> {
 
 export function AppIcon({ name, ...props }: AppIconProps) {
   const paths: Record<IconName, ReactElement> = {
-    aaru: (
+    astra: (
       <path
         d="M10.7 2.25h2.6l9.45 19.5h-5.1l-2.15-4.7h-7l-2.15 4.7h-5.1l9.45-19.5ZM12 8.7l-2.05 4.6h4.1L12 8.7Z"
         fill="#8b7cff"

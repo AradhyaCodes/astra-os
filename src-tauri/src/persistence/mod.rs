@@ -1,6 +1,6 @@
 //! Durable JSON snapshot persistence behind a replaceable storage abstraction.
 
-use crate::error::AaruError;
+use crate::error::AstraError;
 use crate::filesystem::VirtualFileSystem;
 use crate::fs_provider::HostMountRecord;
 use crate::memory::MemoryRuntimeSnapshot;
@@ -90,8 +90,8 @@ impl Default for PersistentSnapshot {
 }
 
 pub trait PersistenceStore {
-    fn load(&self) -> Result<Option<PersistentSnapshot>, AaruError>;
-    fn save(&self, snapshot: &PersistentSnapshot) -> Result<(), AaruError>;
+    fn load(&self) -> Result<Option<PersistentSnapshot>, AstraError>;
+    fn save(&self, snapshot: &PersistentSnapshot) -> Result<(), AstraError>;
 }
 
 #[derive(Debug, Clone)]
@@ -114,7 +114,7 @@ impl JsonPersistence {
         &self.path
     }
 
-    pub fn load_recovering(&self) -> Result<LoadReport, AaruError> {
+    pub fn load_recovering(&self) -> Result<LoadReport, AstraError> {
         if let Some(size) = file_size(&self.path) {
             if size > MAX_STATE_FILE_BYTES {
                 let sidelined = self.sideline_oversized_file()?;
@@ -148,7 +148,7 @@ impl JsonPersistence {
                 snapshot: PersistentSnapshot::default(),
                 recovery_notice: None,
             }),
-            Err(AaruError::CorruptPersistence(reason)) => {
+            Err(AstraError::CorruptPersistence(reason)) => {
                 let quarantined = self.quarantine_corrupt_file()?;
                 let snapshot = self.load()?.unwrap_or_default();
                 Ok(LoadReport {
@@ -163,7 +163,7 @@ impl JsonPersistence {
         }
     }
 
-    fn sideline_oversized_file(&self) -> Result<PathBuf, AaruError> {
+    fn sideline_oversized_file(&self) -> Result<PathBuf, AstraError> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -172,14 +172,14 @@ impl JsonPersistence {
             .path
             .with_extension(format!("oversized-{timestamp}.json"));
         fs::rename(&self.path, &target).map_err(|error| {
-            AaruError::Persistence(format!("could not set aside oversized state: {error}"))
+            AstraError::Persistence(format!("could not set aside oversized state: {error}"))
         })?;
         // A stale backup would just be re-loaded on the next boot.
         let _ = fs::remove_file(self.backup_path());
         Ok(target)
     }
 
-    fn quarantine_corrupt_file(&self) -> Result<PathBuf, AaruError> {
+    fn quarantine_corrupt_file(&self) -> Result<PathBuf, AstraError> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -188,7 +188,7 @@ impl JsonPersistence {
             .path
             .with_extension(format!("corrupt-{timestamp}.json"));
         fs::rename(&self.path, &corrupt_path).map_err(|error| {
-            AaruError::Persistence(format!("could not quarantine corrupt state: {error}"))
+            AstraError::Persistence(format!("could not quarantine corrupt state: {error}"))
         })?;
         Ok(corrupt_path)
     }
@@ -203,7 +203,7 @@ impl JsonPersistence {
 }
 
 impl PersistenceStore for JsonPersistence {
-    fn load(&self) -> Result<Option<PersistentSnapshot>, AaruError> {
+    fn load(&self) -> Result<Option<PersistentSnapshot>, AstraError> {
         let source = if self.path.exists() {
             &self.path
         } else if self.backup_path().exists() {
@@ -214,20 +214,20 @@ impl PersistenceStore for JsonPersistence {
         read_snapshot(source).map(Some)
     }
 
-    fn save(&self, snapshot: &PersistentSnapshot) -> Result<(), AaruError> {
+    fn save(&self, snapshot: &PersistentSnapshot) -> Result<(), AstraError> {
         let parent = self.path.parent().ok_or_else(|| {
-            AaruError::Persistence("state path has no parent directory".to_string())
+            AstraError::Persistence("state path has no parent directory".to_string())
         })?;
         fs::create_dir_all(parent).map_err(|error| {
-            AaruError::Persistence(format!("could not create state directory: {error}"))
+            AstraError::Persistence(format!("could not create state directory: {error}"))
         })?;
 
         let bytes = serde_json::to_vec_pretty(snapshot)
-            .map_err(|error| AaruError::Serialization(error.to_string()))?;
+            .map_err(|error| AstraError::Serialization(error.to_string()))?;
         let temporary = self.temporary_path();
         if temporary.exists() {
             fs::remove_file(&temporary).map_err(|error| {
-                AaruError::Persistence(format!("could not remove stale temporary state: {error}"))
+                AstraError::Persistence(format!("could not remove stale temporary state: {error}"))
             })?;
         }
         let mut file = OpenOptions::new()
@@ -235,32 +235,32 @@ impl PersistenceStore for JsonPersistence {
             .write(true)
             .open(&temporary)
             .map_err(|error| {
-                AaruError::Persistence(format!("could not create temporary state: {error}"))
+                AstraError::Persistence(format!("could not create temporary state: {error}"))
             })?;
         file.write_all(&bytes).map_err(|error| {
-            AaruError::Persistence(format!("could not write temporary state: {error}"))
+            AstraError::Persistence(format!("could not write temporary state: {error}"))
         })?;
         file.sync_all().map_err(|error| {
-            AaruError::Persistence(format!("could not flush temporary state: {error}"))
+            AstraError::Persistence(format!("could not flush temporary state: {error}"))
         })?;
         drop(file);
 
         let backup = self.backup_path();
         if backup.exists() {
             fs::remove_file(&backup).map_err(|error| {
-                AaruError::Persistence(format!("could not clear old state backup: {error}"))
+                AstraError::Persistence(format!("could not clear old state backup: {error}"))
             })?;
         }
         if self.path.exists() {
             fs::rename(&self.path, &backup).map_err(|error| {
-                AaruError::Persistence(format!("could not stage existing state: {error}"))
+                AstraError::Persistence(format!("could not stage existing state: {error}"))
             })?;
         }
         if let Err(error) = fs::rename(&temporary, &self.path) {
             if backup.exists() {
                 let _ = fs::rename(&backup, &self.path);
             }
-            return Err(AaruError::Persistence(format!(
+            return Err(AstraError::Persistence(format!(
                 "could not commit new state: {error}"
             )));
         }
@@ -277,15 +277,15 @@ fn file_size(path: &Path) -> Option<u64> {
     fs::metadata(path).ok().map(|meta| meta.len())
 }
 
-fn read_snapshot(path: &Path) -> Result<PersistentSnapshot, AaruError> {
+fn read_snapshot(path: &Path) -> Result<PersistentSnapshot, AstraError> {
     let bytes = fs::read(path)
-        .map_err(|error| AaruError::Persistence(format!("could not read state: {error}")))?;
+        .map_err(|error| AstraError::Persistence(format!("could not read state: {error}")))?;
     let mut snapshot: PersistentSnapshot = serde_json::from_slice(&bytes)
-        .map_err(|_| AaruError::CorruptPersistence("invalid state JSON".to_string()))?;
+        .map_err(|_| AstraError::CorruptPersistence("invalid state JSON".to_string()))?;
     if snapshot.schema_version < MINIMUM_SCHEMA_VERSION
         || snapshot.schema_version > CURRENT_SCHEMA_VERSION
     {
-        return Err(AaruError::CorruptPersistence(format!(
+        return Err(AstraError::CorruptPersistence(format!(
             "unsupported state schema version {}",
             snapshot.schema_version
         )));

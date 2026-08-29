@@ -5,7 +5,7 @@ use super::config::{PHYSICAL_FRAMES, SWAP_SLOTS};
 use super::page_table::PageLocation;
 use super::replacement::ReplacementPolicy;
 use super::{AccessOutcome, MemoryManager};
-use crate::error::AaruError;
+use crate::error::AstraError;
 
 fn swapped(location: Option<PageLocation>) -> bool {
     matches!(location, Some(PageLocation::Swapped(_)))
@@ -180,7 +180,7 @@ fn out_of_memory_fails_cleanly_without_changing_state() {
     let err = memory
         .allocate(1, PHYSICAL_FRAMES + SWAP_SLOTS + 1)
         .unwrap_err();
-    assert!(matches!(err, AaruError::OutOfMemory { .. }));
+    assert!(matches!(err, AstraError::OutOfMemory { .. }));
     assert!(!memory.is_tracked(1));
     assert_eq!(memory.snapshot().frames_used, 0);
 
@@ -188,7 +188,7 @@ fn out_of_memory_fails_cleanly_without_changing_state() {
     memory.allocate(2, PHYSICAL_FRAMES).unwrap();
     memory.allocate(3, SWAP_SLOTS).unwrap();
     let err = memory.allocate(4, 1).unwrap_err();
-    assert!(matches!(err, AaruError::OutOfMemory { .. }));
+    assert!(matches!(err, AstraError::OutOfMemory { .. }));
     assert!(!memory.is_tracked(4));
     let snapshot = memory.snapshot();
     assert_eq!(snapshot.frames_used, PHYSICAL_FRAMES);

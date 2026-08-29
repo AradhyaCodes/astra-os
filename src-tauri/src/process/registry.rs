@@ -1,6 +1,6 @@
-//! Registry of built-in Aaru applications and games.
+//! Registry of built-in Astra applications and games.
 //!
-//! These become *simulated* processes (`AARU_APP` / `AARU_GAME`). Some are
+//! These become *simulated* processes (`ASTRA_APP` / `ASTRA_GAME`). Some are
 //! backed by a real Tauri window (`window: Some(app_id)`); the rest are
 //! process-only for now and will grow UIs / simulated memory allocation in a
 //! later phase.
@@ -14,7 +14,7 @@ pub enum BuiltinKind {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct AaruAppDef {
+pub struct AstraAppDef {
     /// Lookup key, matched case-insensitively by `almanac run`.
     pub key: &'static str,
     pub name: &'static str,
@@ -27,8 +27,8 @@ pub struct AaruAppDef {
     pub workload: &'static str,
 }
 
-const BUILTINS: &[AaruAppDef] = &[
-    AaruAppDef {
+const BUILTINS: &[AstraAppDef] = &[
+    AstraAppDef {
         key: "almanac",
         name: "Almanac",
         kind: BuiltinKind::App,
@@ -38,7 +38,7 @@ const BUILTINS: &[AaruAppDef] = &[
         sim_mem_mb: 40.0,
         workload: "interactive command shell",
     },
-    AaruAppDef {
+    AstraAppDef {
         key: "terminal",
         name: "Terminal",
         kind: BuiltinKind::App,
@@ -48,7 +48,7 @@ const BUILTINS: &[AaruAppDef] = &[
         sim_mem_mb: 36.0,
         workload: "terminal session",
     },
-    AaruAppDef {
+    AstraAppDef {
         key: "taskmanager",
         name: "TaskManager",
         kind: BuiltinKind::App,
@@ -58,7 +58,7 @@ const BUILTINS: &[AaruAppDef] = &[
         sim_mem_mb: 44.0,
         workload: "process table polling",
     },
-    AaruAppDef {
+    AstraAppDef {
         key: "settings",
         name: "Settings",
         kind: BuiltinKind::App,
@@ -68,7 +68,7 @@ const BUILTINS: &[AaruAppDef] = &[
         sim_mem_mb: 32.0,
         workload: "settings UI",
     },
-    AaruAppDef {
+    AstraAppDef {
         key: "calculator",
         name: "Calculator",
         kind: BuiltinKind::App,
@@ -78,7 +78,7 @@ const BUILTINS: &[AaruAppDef] = &[
         sim_mem_mb: 22.0,
         workload: "arithmetic UI",
     },
-    AaruAppDef {
+    AstraAppDef {
         key: "texteditor",
         name: "TextEditor",
         kind: BuiltinKind::App,
@@ -88,7 +88,7 @@ const BUILTINS: &[AaruAppDef] = &[
         sim_mem_mb: 30.0,
         workload: "text buffer editing",
     },
-    AaruAppDef {
+    AstraAppDef {
         key: "imageviewer",
         name: "ImageViewer",
         kind: BuiltinKind::App,
@@ -99,7 +99,7 @@ const BUILTINS: &[AaruAppDef] = &[
         workload: "raster image decode + display",
     },
     // ---- games ----
-    AaruAppDef {
+    AstraAppDef {
         key: "snake",
         name: "Snake",
         kind: BuiltinKind::Game,
@@ -109,7 +109,7 @@ const BUILTINS: &[AaruAppDef] = &[
         sim_mem_mb: 48.0,
         workload: "grid game loop @ 15 ticks/s",
     },
-    AaruAppDef {
+    AstraAppDef {
         key: "pong",
         name: "Pong",
         kind: BuiltinKind::Game,
@@ -119,7 +119,7 @@ const BUILTINS: &[AaruAppDef] = &[
         sim_mem_mb: 46.0,
         workload: "physics + render loop @ 60fps",
     },
-    AaruAppDef {
+    AstraAppDef {
         key: "minesweeper",
         name: "Minesweeper",
         kind: BuiltinKind::Game,
@@ -129,7 +129,7 @@ const BUILTINS: &[AaruAppDef] = &[
         sim_mem_mb: 42.0,
         workload: "board solver + flood fill",
     },
-    AaruAppDef {
+    AstraAppDef {
         key: "tetris",
         name: "Tetris",
         kind: BuiltinKind::Game,
@@ -141,12 +141,12 @@ const BUILTINS: &[AaruAppDef] = &[
     },
 ];
 
-pub fn builtins() -> &'static [AaruAppDef] {
+pub fn builtins() -> &'static [AstraAppDef] {
     BUILTINS
 }
 
 /// Case-insensitive lookup by key or display name.
-pub fn find_builtin(query: &str) -> Option<&'static AaruAppDef> {
+pub fn find_builtin(query: &str) -> Option<&'static AstraAppDef> {
     let query = query.trim().to_ascii_lowercase();
     BUILTINS
         .iter()

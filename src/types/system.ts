@@ -1,5 +1,5 @@
 /**
- * Aaru-OS — Shared TypeScript types
+ * Astra OS — Shared TypeScript types
  *
  * These types mirror the Rust structs exposed via Tauri commands.
  * They represent the high-level system configuration and are intentionally
@@ -10,14 +10,14 @@
 // Scheduler
 // ---------------------------------------------------------------------------
 
-/** Scheduling algorithms supported by the Aaru-OS kernel. */
+/** Scheduling algorithms supported by the Astra OS kernel. */
 export type SchedulerAlgorithm = "RoundRobin" | "FCFS" | "Priority";
 
 // ---------------------------------------------------------------------------
 // Memory
 // ---------------------------------------------------------------------------
 
-/** Memory management policies supported by Aaru-OS. */
+/** Memory management policies supported by Astra OS. */
 export type MemoryPolicy = "Paging" | "Swap" | "FIFOReplacement" | "LRUReplacement";
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ export interface FilesystemRules {
 // Security
 // ---------------------------------------------------------------------------
 
-/** Security policy for the Aaru-OS single-user environment. */
+/** Security policy for the Astra OS single-user environment. */
 export interface SecurityConfig {
   /** Only one user account is supported in v0.1. */
   single_user: boolean;
@@ -70,7 +70,7 @@ export interface KernelConfig {
 
 /**
  * Complete system configuration returned by the `get_system_config` Tauri command.
- * Represents the fixed hardware and policy parameters of the Aaru-OS v0.1 instance.
+ * Represents the fixed hardware and policy parameters of the Astra OS v0.1 instance.
  */
 export interface SystemConfig {
   kernel: KernelConfig;

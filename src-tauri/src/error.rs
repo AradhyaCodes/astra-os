@@ -1,14 +1,14 @@
-//! Aaru-OS — Error types
+//! Astra OS — Error types
 //!
-//! Central error enum for all Aaru-OS subsystems. Each variant maps to a
+//! Central error enum for all Astra OS subsystems. Each variant maps to a
 //! specific subsystem failure. `thiserror` derives `Display` and `Error`
 //! implementations automatically.
 
 use thiserror::Error;
 
-/// Top-level error type for the Aaru-OS runtime.
+/// Top-level error type for the Astra OS runtime.
 #[derive(Debug, Error)]
-pub enum AaruError {
+pub enum AstraError {
     // ------------------------------------------------------------------
     // Kernel / Configuration
     // ------------------------------------------------------------------
@@ -139,9 +139,9 @@ pub enum AaruError {
     Serialization(String),
 }
 
-/// Conversion so `AaruError` can be returned directly from Tauri commands
+/// Conversion so `AstraError` can be returned directly from Tauri commands
 /// (Tauri commands require errors to implement `Into<String>` or `Serialize`).
-impl serde::Serialize for AaruError {
+impl serde::Serialize for AstraError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,

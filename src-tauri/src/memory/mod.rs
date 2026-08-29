@@ -1,8 +1,8 @@
-//! Aaru-OS — Simulated virtual memory subsystem (Phase 7).
+//! Astra OS — Simulated virtual memory subsystem (Phase 7).
 //!
-//! Aaru models a small paged machine: **4096 MB of RAM as 1024 physical frames
-//! of 4 MB**, plus a fixed swap area. Aaru-native processes (`AARU_APP`,
-//! `AARU_GAME`) request simulated memory; the manager builds a page table, maps
+//! Astra models a small paged machine: **4096 MB of RAM as 1024 physical frames
+//! of 4 MB**, plus a fixed swap area. Astra-native processes (`ASTRA_APP`,
+//! `ASTRA_GAME`) request simulated memory; the manager builds a page table, maps
 //! pages to frames, and on pressure evicts pages to swap using a pluggable
 //! [`replacement::PageReplacementStrategy`] (FIFO or LRU).
 //!
@@ -23,7 +23,7 @@ pub mod page_table;
 pub mod replacement;
 pub mod swap;
 
-use crate::error::AaruError;
+use crate::error::AstraError;
 use crate::process::Pid;
 use frame_table::FrameTable;
 use page_table::PageTable;
@@ -77,7 +77,7 @@ pub struct FrameSpan {
 }
 
 /// Real Windows physical-memory usage — reported entirely separately from the
-/// simulated Aaru RAM model, never mixed into it.
+/// simulated Astra RAM model, never mixed into it.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct HostMemory {
     pub total_mb: u64,
@@ -243,9 +243,9 @@ impl MemoryManager {
     // ------------------------------------------------------------------
 
     /// Give `pid` a working set of `pages` pages: fill RAM first, spill the
-    /// remainder into swap. Fails cleanly with [`AaruError::OutOfMemory`] (and
+    /// remainder into swap. Fails cleanly with [`AstraError::OutOfMemory`] (and
     /// no state change) when neither RAM nor swap can hold the request.
-    pub fn allocate(&mut self, pid: Pid, pages: usize) -> Result<Allocation, AaruError> {
+    pub fn allocate(&mut self, pid: Pid, pages: usize) -> Result<Allocation, AstraError> {
         if let Some(table) = self.tables.get(&pid) {
             return Ok(Allocation {
                 pages: table.len(),
@@ -256,7 +256,7 @@ impl MemoryManager {
 
         let capacity = self.frames.free() + self.swap.free();
         if pages > capacity {
-            return Err(AaruError::OutOfMemory {
+            return Err(AstraError::OutOfMemory {
                 requested_mb: u64::from(pages as u32 * PAGE_SIZE_MB),
                 available_mb: u64::from(capacity as u32 * PAGE_SIZE_MB),
             });
@@ -306,15 +306,15 @@ impl MemoryManager {
     /// Touch page `page` of process `pid`. Returns whether it was a hit or a
     /// fault (with a page-in). Errors only on an unknown PID / page index, or a
     /// genuine out-of-memory during the page-in — never panics.
-    pub fn access(&mut self, pid: Pid, page: usize) -> Result<AccessOutcome, AaruError> {
+    pub fn access(&mut self, pid: Pid, page: usize) -> Result<AccessOutcome, AstraError> {
         let location = {
             let table = self.tables.get(&pid).ok_or_else(|| {
-                AaruError::Memory(format!("PID {pid} has no simulated memory allocation"))
+                AstraError::Memory(format!("PID {pid} has no simulated memory allocation"))
             })?;
             table
                 .entry(page)
                 .ok_or_else(|| {
-                    AaruError::InvalidArgument(format!(
+                    AstraError::InvalidArgument(format!(
                         "PID {pid} has no virtual page {page} (0..{})",
                         table.len()
                     ))
@@ -382,7 +382,7 @@ impl MemoryManager {
 
     /// Obtain a free frame for `(pid, page)`, evicting a victim (swap-out) via
     /// the replacement policy when RAM is full.
-    fn acquire_frame(&mut self, pid: Pid, page: usize) -> Result<usize, AaruError> {
+    fn acquire_frame(&mut self, pid: Pid, page: usize) -> Result<usize, AstraError> {
         if let Some(frame) = self.frames.allocate(FrameOwner { pid, page }) {
             return Ok(frame);
         }
@@ -391,7 +391,7 @@ impl MemoryManager {
         let victim = self
             .policy
             .choose_victim(&occupied)
-            .ok_or(AaruError::OutOfMemory {
+            .ok_or(AstraError::OutOfMemory {
                 requested_mb: u64::from(PAGE_SIZE_MB),
                 available_mb: 0,
             })?;
@@ -424,7 +424,7 @@ impl MemoryManager {
                     table.set_location(evicted.page, PageLocation::Frame(frame));
                 }
                 self.policy.on_load(frame, self.clock);
-                return Err(AaruError::OutOfMemory {
+                return Err(AstraError::OutOfMemory {
                     requested_mb: u64::from(PAGE_SIZE_MB),
                     available_mb: 0,
                 });
@@ -556,7 +556,7 @@ mod host_memory {
     }
 
     /// Best-effort read of real Windows physical-memory usage. `None` if the
-    /// call fails — this never influences the simulated Aaru RAM model.
+    /// call fails — this never influences the simulated Astra RAM model.
     pub fn sample() -> Option<HostMemory> {
         // SAFETY: `status` is a correctly-sized, fully-initialised C struct and
         // `GlobalMemoryStatusEx` only writes into it.

@@ -1,9 +1,9 @@
-//! Authentication and independent resource-lock policy for Aaru-OS.
+//! Authentication and independent resource-lock policy for Astra OS.
 //!
 //! Password hashes are persistent. Authentication attempts, the login session,
 //! and temporary resource grants are deliberately process-local.
 
-use crate::error::AaruError;
+use crate::error::AstraError;
 use crate::filesystem::ResourceId;
 use argon2::password_hash::{rand_core::OsRng, PasswordHash, SaltString};
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
@@ -17,8 +17,8 @@ const MINIMUM_PASSWORD_LENGTH: usize = 8;
 pub struct PersistentSecurity {
     login_password_hash: Option<String>,
     resource_lock_hashes: BTreeMap<ResourceId, String>,
-    /// Aaru-level locks on **host** resources, keyed by stable canonical path.
-    /// These are Aaru access gates only — they do not touch Windows ACLs.
+    /// Astra-level locks on **host** resources, keyed by stable canonical path.
+    /// These are Astra access gates only — they do not touch Windows ACLs.
     #[serde(default)]
     host_lock_hashes: BTreeMap<String, String>,
 }
@@ -77,9 +77,9 @@ impl SecurityManager {
         }
     }
 
-    pub fn configure_login(&mut self, password: &str) -> Result<AuthenticationStatus, AaruError> {
+    pub fn configure_login(&mut self, password: &str) -> Result<AuthenticationStatus, AstraError> {
         if self.persistent.login_password_hash.is_some() {
-            return Err(AaruError::CredentialsAlreadyConfigured);
+            return Err(AstraError::CredentialsAlreadyConfigured);
         }
         validate_password(password)?;
         self.persistent.login_password_hash = Some(hash_password(password)?);
@@ -88,9 +88,9 @@ impl SecurityManager {
         Ok(self.status())
     }
 
-    pub fn login(&mut self, password: &str) -> Result<AuthenticationStatus, AaruError> {
+    pub fn login(&mut self, password: &str) -> Result<AuthenticationStatus, AstraError> {
         if self.session.login_locked_out {
-            return Err(AaruError::AccountLocked {
+            return Err(AstraError::AccountLocked {
                 attempts: MAX_AUTH_ATTEMPTS,
             });
         }
@@ -98,7 +98,7 @@ impl SecurityManager {
             .persistent
             .login_password_hash
             .as_deref()
-            .ok_or(AaruError::CredentialsNotConfigured)?;
+            .ok_or(AstraError::CredentialsNotConfigured)?;
 
         if verify_password(hash, password)? {
             self.session.authenticated = true;
@@ -110,11 +110,11 @@ impl SecurityManager {
         self.session.failed_login_attempts = self.session.failed_login_attempts.saturating_add(1);
         if self.session.failed_login_attempts >= MAX_AUTH_ATTEMPTS {
             self.session.login_locked_out = true;
-            return Err(AaruError::AccountLocked {
+            return Err(AstraError::AccountLocked {
                 attempts: MAX_AUTH_ATTEMPTS,
             });
         }
-        Err(AaruError::AuthenticationFailed)
+        Err(AstraError::AuthenticationFailed)
     }
 
     pub fn logout(&mut self) {
@@ -138,11 +138,11 @@ impl SecurityManager {
             .unwrap_or(false)
     }
 
-    pub fn require_login(&self) -> Result<(), AaruError> {
+    pub fn require_login(&self) -> Result<(), AstraError> {
         if self.session.authenticated {
             Ok(())
         } else {
-            Err(AaruError::AuthenticationRequired)
+            Err(AstraError::AuthenticationRequired)
         }
     }
 
@@ -150,14 +150,14 @@ impl SecurityManager {
         &mut self,
         resource_id: ResourceId,
         password: &str,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         self.require_login()?;
         if self
             .persistent
             .resource_lock_hashes
             .contains_key(&resource_id)
         {
-            return Err(AaruError::InvalidArgument(
+            return Err(AstraError::InvalidArgument(
                 "resource is already locked".to_string(),
             ));
         }
@@ -173,7 +173,7 @@ impl SecurityManager {
         &mut self,
         resource_id: ResourceId,
         password: &str,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         self.require_login()?;
         self.verify_resource_password(resource_id, password)?;
         self.persistent.resource_lock_hashes.remove(&resource_id);
@@ -187,7 +187,7 @@ impl SecurityManager {
         &mut self,
         boundaries: &[ResourceId],
         password: &str,
-    ) -> Result<Option<ResourceId>, AaruError> {
+    ) -> Result<Option<ResourceId>, AstraError> {
         self.require_login()?;
         let boundary = boundaries.iter().copied().find(|resource_id| {
             self.is_resource_locked(*resource_id)
@@ -254,7 +254,7 @@ impl SecurityManager {
     // ------------------------------------------------------------------
     // Host-resource locks
     //
-    // These are Aaru-level access gates keyed by a stable canonical host path.
+    // These are Astra-level access gates keyed by a stable canonical host path.
     // They do NOT encrypt anything, do NOT touch Windows ACLs, and do NOT make
     // the folder inaccessible to other Windows programs.
     // ------------------------------------------------------------------
@@ -263,10 +263,10 @@ impl SecurityManager {
         self.persistent.host_lock_hashes.contains_key(canonical_id)
     }
 
-    pub fn add_host_lock(&mut self, canonical_id: &str, password: &str) -> Result<(), AaruError> {
+    pub fn add_host_lock(&mut self, canonical_id: &str, password: &str) -> Result<(), AstraError> {
         self.require_login()?;
         if self.persistent.host_lock_hashes.contains_key(canonical_id) {
-            return Err(AaruError::InvalidArgument(
+            return Err(AstraError::InvalidArgument(
                 "this host resource is already locked".to_string(),
             ));
         }
@@ -282,7 +282,7 @@ impl SecurityManager {
         &mut self,
         canonical_id: &str,
         password: &str,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         self.require_login()?;
         self.verify_host_password(canonical_id, password)?;
         self.persistent.host_lock_hashes.remove(canonical_id);
@@ -308,7 +308,7 @@ impl SecurityManager {
         &mut self,
         ancestor_ids: &[String],
         password: &str,
-    ) -> Result<Option<String>, AaruError> {
+    ) -> Result<Option<String>, AstraError> {
         self.require_login()?;
         let target = ancestor_ids
             .iter()
@@ -330,9 +330,9 @@ impl SecurityManager {
         &mut self,
         canonical_id: &str,
         password: &str,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         if self.session.locked_out_host_paths.contains(canonical_id) {
-            return Err(AaruError::AccountLocked {
+            return Err(AstraError::AccountLocked {
                 attempts: MAX_AUTH_ATTEMPTS,
             });
         }
@@ -341,7 +341,7 @@ impl SecurityManager {
             .host_lock_hashes
             .get(canonical_id)
             .ok_or_else(|| {
-                AaruError::InvalidArgument("this host resource is not locked".to_string())
+                AstraError::InvalidArgument("this host resource is not locked".to_string())
             })?;
         if verify_password(hash, password)? {
             return Ok(());
@@ -356,20 +356,20 @@ impl SecurityManager {
             self.session
                 .locked_out_host_paths
                 .insert(canonical_id.to_string());
-            return Err(AaruError::AccountLocked {
+            return Err(AstraError::AccountLocked {
                 attempts: MAX_AUTH_ATTEMPTS,
             });
         }
-        Err(AaruError::AuthenticationFailed)
+        Err(AstraError::AuthenticationFailed)
     }
 
     fn verify_resource_password(
         &mut self,
         resource_id: ResourceId,
         password: &str,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         if self.session.locked_out_resources.contains(&resource_id) {
-            return Err(AaruError::AccountLocked {
+            return Err(AstraError::AccountLocked {
                 attempts: MAX_AUTH_ATTEMPTS,
             });
         }
@@ -377,7 +377,7 @@ impl SecurityManager {
             .persistent
             .resource_lock_hashes
             .get(&resource_id)
-            .ok_or_else(|| AaruError::InvalidArgument("resource is not locked".to_string()))?;
+            .ok_or_else(|| AstraError::InvalidArgument("resource is not locked".to_string()))?;
         if verify_password(hash, password)? {
             return Ok(());
         }
@@ -390,11 +390,11 @@ impl SecurityManager {
         *attempts = attempts.saturating_add(1);
         if *attempts >= MAX_AUTH_ATTEMPTS {
             self.session.locked_out_resources.insert(resource_id);
-            return Err(AaruError::AccountLocked {
+            return Err(AstraError::AccountLocked {
                 attempts: MAX_AUTH_ATTEMPTS,
             });
         }
-        Err(AaruError::AuthenticationFailed)
+        Err(AstraError::AuthenticationFailed)
     }
 }
 
@@ -404,26 +404,26 @@ impl Default for SecurityManager {
     }
 }
 
-fn validate_password(password: &str) -> Result<(), AaruError> {
+fn validate_password(password: &str) -> Result<(), AstraError> {
     if password.chars().count() < MINIMUM_PASSWORD_LENGTH {
-        return Err(AaruError::InvalidArgument(format!(
+        return Err(AstraError::InvalidArgument(format!(
             "password must contain at least {MINIMUM_PASSWORD_LENGTH} characters"
         )));
     }
     Ok(())
 }
 
-fn hash_password(password: &str) -> Result<String, AaruError> {
+fn hash_password(password: &str) -> Result<String, AstraError> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
         .map(|hash| hash.to_string())
-        .map_err(|error| AaruError::Persistence(format!("password hashing failed: {error}")))
+        .map_err(|error| AstraError::Persistence(format!("password hashing failed: {error}")))
 }
 
-fn verify_password(hash: &str, password: &str) -> Result<bool, AaruError> {
+fn verify_password(hash: &str, password: &str) -> Result<bool, AstraError> {
     let parsed = PasswordHash::new(hash)
-        .map_err(|_| AaruError::CorruptPersistence("invalid password hash".to_string()))?;
+        .map_err(|_| AstraError::CorruptPersistence("invalid password hash".to_string()))?;
     Ok(Argon2::default()
         .verify_password(password.as_bytes(), &parsed)
         .is_ok())
@@ -440,7 +440,7 @@ mod tests {
         security.logout();
         assert!(matches!(
             security.login("wrong-password"),
-            Err(AaruError::AuthenticationFailed)
+            Err(AstraError::AuthenticationFailed)
         ));
         assert!(security.login("correct-horse").unwrap().authenticated);
     }
@@ -452,19 +452,19 @@ mod tests {
         security.logout();
         assert!(matches!(
             security.login("incorrect-1"),
-            Err(AaruError::AuthenticationFailed)
+            Err(AstraError::AuthenticationFailed)
         ));
         assert!(matches!(
             security.login("incorrect-2"),
-            Err(AaruError::AuthenticationFailed)
+            Err(AstraError::AuthenticationFailed)
         ));
         assert!(matches!(
             security.login("incorrect-3"),
-            Err(AaruError::AccountLocked { attempts: 3 })
+            Err(AstraError::AccountLocked { attempts: 3 })
         ));
         assert!(matches!(
             security.login("correct-horse"),
-            Err(AaruError::AccountLocked { attempts: 3 })
+            Err(AstraError::AccountLocked { attempts: 3 })
         ));
     }
 

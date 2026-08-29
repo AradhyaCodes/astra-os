@@ -135,7 +135,7 @@ pub enum HostAppResolution {
     /// A known alias, but the executable is not installed.
     NotInstalled { alias: String },
     /// Not a configured alias and not on `PATH` — the caller may treat it as a
-    /// non-application (e.g. fall back to a built-in Aaru app).
+    /// non-application (e.g. fall back to a built-in Astra app).
     Unknown,
 }
 
@@ -229,7 +229,7 @@ pub fn alias_names() -> Vec<&'static str> {
     ALIASES.iter().map(|entry| entry.alias).collect()
 }
 
-/// One host application Aaru can launch, plus whether it is installed here.
+/// One host application Astra can launch, plus whether it is installed here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HostAppInfo {
     /// Alias / display name — also the `almanac run <name>` argument.

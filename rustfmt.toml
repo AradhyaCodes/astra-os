@@ -1,4 +1,4 @@
-# Aaru-OS — Rust formatting configuration
+# Astra OS — Rust formatting configuration
 # https://rust-lang.github.io/rustfmt/
 
 edition = "2021"

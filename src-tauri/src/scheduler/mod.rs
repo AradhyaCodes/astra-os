@@ -1,13 +1,13 @@
-//! Aaru-OS — Virtual CPU and process scheduler (Phase 6).
+//! Astra OS — Virtual CPU and process scheduler (Phase 6).
 //!
-//! Aaru-OS models a **2-core virtual CPU** and schedules its own simulated
+//! Astra OS models a **2-core virtual CPU** and schedules its own simulated
 //! processes on it for teaching purposes. This is a simulation:
 //!
 //! * it does **not** replace or drive the real Windows scheduler;
 //! * host applications keep running under Windows exactly as before;
-//! * only `AARU_APP` and `AARU_GAME` processes are placed on the virtual cores.
+//! * only `ASTRA_APP` and `ASTRA_GAME` processes are placed on the virtual cores.
 //!   `HOST_APP` / `HOST_COMMAND` processes are observed in Task Manager but are
-//!   never represented as being physically scheduled by Aaru.
+//!   never represented as being physically scheduled by Astra.
 //!
 //! The simulation advances in **deterministic ticks** ([`Scheduler::tick`]).
 //! Correctness never depends on wall-clock time or on frontend render speed —
@@ -22,7 +22,7 @@
 
 pub mod strategy;
 
-use crate::error::AaruError;
+use crate::error::AstraError;
 use crate::kernel::SchedulerAlgorithm;
 use crate::process::{Pid, Priority, ProcessState, ProcessType};
 use serde::{Deserialize, Serialize};
@@ -36,12 +36,12 @@ pub const CORE_COUNT: usize = crate::kernel::CPU_CORES as usize;
 ///
 /// Shared by the Almanac parser and the `scheduler_set_algorithm` IPC command
 /// so the accepted spelling set stays in one place.
-pub fn parse_algorithm(raw: &str) -> Result<SchedulerAlgorithm, AaruError> {
+pub fn parse_algorithm(raw: &str) -> Result<SchedulerAlgorithm, AstraError> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "rr" | "roundrobin" | "round-robin" | "round_robin" => Ok(SchedulerAlgorithm::RoundRobin),
         "fcfs" | "fifo" => Ok(SchedulerAlgorithm::Fcfs),
         "priority" | "prio" => Ok(SchedulerAlgorithm::Priority),
-        other => Err(AaruError::AlmanacParse(format!(
+        other => Err(AstraError::AlmanacParse(format!(
             "unknown scheduler '{other}' — use RR, FCFS, or Priority"
         ))),
     }
@@ -59,9 +59,9 @@ pub fn algorithm_label(algorithm: SchedulerAlgorithm) -> &'static str {
 /// Which virtual-CPU-eligible class a process belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScheduleClass {
-    /// `AARU_APP` — interactive built-in application.
+    /// `ASTRA_APP` — interactive built-in application.
     Interactive,
-    /// `AARU_GAME` — game loop; keeps producing work indefinitely.
+    /// `ASTRA_GAME` — game loop; keeps producing work indefinitely.
     Game,
 }
 
@@ -69,8 +69,8 @@ impl ScheduleClass {
     /// `Some` only for the two process types the virtual CPU actually schedules.
     pub fn from_process_type(process_type: ProcessType) -> Option<Self> {
         match process_type {
-            ProcessType::AaruApp => Some(Self::Interactive),
-            ProcessType::AaruGame => Some(Self::Game),
+            ProcessType::AstraApp => Some(Self::Interactive),
+            ProcessType::AstraGame => Some(Self::Game),
             _ => None,
         }
     }
@@ -104,7 +104,7 @@ pub struct Workload {
 }
 
 impl Workload {
-    /// The default workload profile Aaru gives a freshly launched built-in.
+    /// The default workload profile Astra gives a freshly launched built-in.
     pub fn for_class(class: ScheduleClass) -> Self {
         match class {
             ScheduleClass::Interactive => Workload {

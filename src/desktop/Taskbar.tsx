@@ -107,7 +107,7 @@ export function Taskbar({ authenticated, onAlmanacCommand }: TaskbarProps) {
     <nav className="taskbar" aria-label="Desktop taskbar">
       <div className="taskbar-context">
         <span className="status-dot" />
-        <span>{authenticated ? "AARU ONLINE" : "SESSION LOCKED"}</span>
+        <span>{authenticated ? "ASTRA ONLINE" : "SESSION LOCKED"}</span>
       </div>
       <div className="taskbar-center">
         <div className="launcher" ref={startRef}>
@@ -121,14 +121,14 @@ export function Taskbar({ authenticated, onAlmanacCommand }: TaskbarProps) {
               setTrayOpen(false);
             }}
           >
-            <AppIcon name="aaru" />
+            <AppIcon name="astra" />
           </button>
           {startOpen && (
             <section className="start-menu" aria-label="Start menu">
               <header>
-                <AppIcon name="aaru" />
+                <AppIcon name="astra" />
                 <div>
-                  <strong>Aaru</strong>
+                  <strong>Astra</strong>
                   <span>
                     {authenticated ? "LapSession active" : "Authentication required"}
                   </span>
@@ -273,7 +273,7 @@ export function Taskbar({ authenticated, onAlmanacCommand }: TaskbarProps) {
             </div>
             <div className="tray-status">
               <span className="resource-badge virtual">VIRTUAL</span>
-              <p>Aaru scheduler and memory simulation active</p>
+              <p>Astra scheduler and memory simulation active</p>
             </div>
             <div className="tray-status host">
               <span className="resource-badge host">HOST</span>

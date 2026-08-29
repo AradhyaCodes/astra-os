@@ -1,4 +1,4 @@
-//! Aaru-OS — Host shell execution layer.
+//! Astra OS — Host shell execution layer.
 //!
 //! The Almanac *command grammar* lives in [`crate::almanac`]. This module is
 //! only the controlled bridge to the underlying host runtime that Almanac

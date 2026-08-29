@@ -1,5 +1,5 @@
 /**
- * Aaru-OS — Root application component
+ * Astra OS — Root application component
  *
  * Phase 1 renders the desktop shell and its managed applications.
  */

@@ -1,4 +1,4 @@
-# `src/` — Aaru-OS desktop (React)
+# `src/` — Astra OS desktop (React)
 
 The **view and interaction layer only**. Every system decision — auth,
 filesystem policy, process/scheduler/memory state, host access — is made in the
@@ -25,8 +25,8 @@ truth.
 
 - Talk to the backend with `invoke("<command>", { … })` from
   `@tauri-apps/api/core`; handle the rejection path (the command may return an
-  `AaruError` string).
-- Prefer routing user actions through Almanac (`aaru:command` custom event)
+  `AstraError` string).
+- Prefer routing user actions through Almanac (`astra:command` custom event)
   over adding parallel command paths, so the console stays the single log of
   what happened.
 - New window app: add an `AppId` in `stores/windowStore.ts`, render it in

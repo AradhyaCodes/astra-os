@@ -1,14 +1,14 @@
-//! Aaru-OS — Kernel module
+//! Astra OS — Kernel module
 //!
 //! Defines the fixed hardware configuration and high-level kernel parameters
-//! for the Aaru-OS v0.1 virtual machine.
+//! for the Astra OS v0.1 virtual machine.
 //!
 //! **Phase 0**: Data structures and constants only — no runtime behaviour.
 
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
-// Constants — Aaru-OS v0.1 fixed configuration
+// Constants — Astra OS v0.1 fixed configuration
 // ---------------------------------------------------------------------------
 
 /// Number of virtual CPU cores.
@@ -31,7 +31,7 @@ pub const MAX_FAILED_ATTEMPTS: u8 = 3;
 // Scheduler
 // ---------------------------------------------------------------------------
 
-/// Scheduling algorithms that will be implemented in Aaru-OS.
+/// Scheduling algorithms that will be implemented in Astra OS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum SchedulerAlgorithm {
@@ -48,7 +48,7 @@ pub enum SchedulerAlgorithm {
 // Memory
 // ---------------------------------------------------------------------------
 
-/// Memory management policies planned for Aaru-OS.
+/// Memory management policies planned for Astra OS.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum MemoryPolicy {
@@ -75,7 +75,7 @@ pub struct FilesystemRules {
     pub case_sensitive: bool,
     /// Maximum allowed directory nesting depth.
     pub max_depth: u8,
-    /// Whether spaces are permitted in names (false for Aaru-OS).
+    /// Whether spaces are permitted in names (false for Astra OS).
     pub allow_spaces_in_names: bool,
     /// Whether regular files must have extensions.
     pub files_require_extensions: bool,
@@ -96,7 +96,7 @@ impl Default for FilesystemRules {
 // Security
 // ---------------------------------------------------------------------------
 
-/// Security policy for the Aaru-OS single-user environment.
+/// Security policy for the Astra OS single-user environment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityConfig {
     /// Whether the OS operates in single-user mode.
@@ -118,7 +118,7 @@ impl Default for SecurityConfig {
 // KernelConfig
 // ---------------------------------------------------------------------------
 
-/// Core hardware configuration of the Aaru-OS virtual machine.
+/// Core hardware configuration of the Astra OS virtual machine.
 ///
 /// All values are fixed for v0.1 and derived from compile-time constants.
 #[derive(Debug, Clone, Serialize, Deserialize)]

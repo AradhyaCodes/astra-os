@@ -5,13 +5,13 @@
 //! recycle-bin delete, virtual tree generation, …) stay on their own types —
 //! the trait only covers what genuinely generalises.
 
-use crate::error::AaruError;
+use crate::error::AstraError;
 use crate::security::SecurityManager;
 use crate::state::SystemState;
 use serde::Serialize;
 
 use super::host::{HostFilesystem, HOST_LABEL};
-use super::router::AaruLocation;
+use super::router::AstraLocation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -31,8 +31,8 @@ pub struct EntryView {
     pub modified_ms: Option<u64>,
     pub created_ms: Option<u64>,
     pub read_only: bool,
-    /// Aaru-level access lock (does **not** affect Windows permissions).
-    pub aaru_locked: bool,
+    /// Astra-level access lock (does **not** affect Windows permissions).
+    pub astra_locked: bool,
     /// Real host path — populated only for `inspect` on host resources.
     pub host_real_path: Option<String>,
 }
@@ -47,11 +47,11 @@ pub struct SearchHit {
 pub trait FilesystemProvider {
     fn kind(&self) -> ProviderKind;
 
-    /// Scheme label (`AARU` / `HOST`).
+    /// Scheme label (`ASTRA` / `HOST`).
     fn label(&self) -> &'static str;
 
     /// Describe a single resource that this provider owns.
-    fn describe(&self, location: &AaruLocation) -> Result<EntryView, AaruError>;
+    fn describe(&self, location: &AstraLocation) -> Result<EntryView, AstraError>;
 
     /// Append this provider's matches for `query`.
     fn search(&self, query: &str, hits: &mut Vec<SearchHit>);
@@ -77,16 +77,16 @@ impl FilesystemProvider for VirtualFilesystemProvider<'_> {
     }
 
     fn label(&self) -> &'static str {
-        "AARU"
+        "ASTRA"
     }
 
-    fn describe(&self, location: &AaruLocation) -> Result<EntryView, AaruError> {
-        let AaruLocation::Virtual(path) = location else {
-            return Err(AaruError::InvalidPath("not a virtual path".to_string()));
+    fn describe(&self, location: &AstraLocation) -> Result<EntryView, AstraError> {
+        let AstraLocation::Virtual(path) = location else {
+            return Err(AstraError::InvalidPath("not a virtual path".to_string()));
         };
         let info = self.state.inspect("ROOT", path)?;
         Ok(EntryView {
-            display_path: format!("AARU>{}", info.path),
+            display_path: format!("ASTRA>{}", info.path),
             name: info.metadata.name,
             kind: ProviderKind::Virtual,
             is_dir: matches!(
@@ -97,7 +97,7 @@ impl FilesystemProvider for VirtualFilesystemProvider<'_> {
             modified_ms: Some(info.metadata.modified_at_ms),
             created_ms: Some(info.metadata.created_at_ms),
             read_only: !info.metadata.permissions.write,
-            aaru_locked: info.metadata.locked,
+            astra_locked: info.metadata.locked,
             host_real_path: None,
         })
     }
@@ -107,7 +107,7 @@ impl FilesystemProvider for VirtualFilesystemProvider<'_> {
         if let Ok(results) = self.state.search("ROOT", "ROOT", query) {
             for hit in results.matches {
                 hits.push(SearchHit {
-                    display: format!("AARU>{}", hit.path),
+                    display: format!("ASTRA>{}", hit.path),
                     kind: ProviderKind::Virtual,
                 });
             }
@@ -139,9 +139,9 @@ impl FilesystemProvider for HostFilesystemProvider<'_> {
         HOST_LABEL
     }
 
-    fn describe(&self, location: &AaruLocation) -> Result<EntryView, AaruError> {
-        let AaruLocation::Host { mount, relative } = location else {
-            return Err(AaruError::InvalidPath("not a host path".to_string()));
+    fn describe(&self, location: &AstraLocation) -> Result<EntryView, AstraError> {
+        let AstraLocation::Host { mount, relative } = location else {
+            return Err(AstraError::InvalidPath("not a host path".to_string()));
         };
         let entry = self.host.entry(mount, relative)?;
         let real = self.host.real_path(mount, relative)?;
@@ -161,7 +161,7 @@ impl FilesystemProvider for HostFilesystemProvider<'_> {
             modified_ms: entry.modified_ms,
             created_ms: entry.created_ms,
             read_only: entry.read_only,
-            aaru_locked: ancestor_ids
+            astra_locked: ancestor_ids
                 .iter()
                 .any(|id| self.security.is_host_locked(id))
                 || self.security.is_host_locked(&canonical_id),

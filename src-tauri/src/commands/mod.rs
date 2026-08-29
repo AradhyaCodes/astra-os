@@ -2,7 +2,7 @@
 //! remain in Rust's [`SystemState`], never in React.
 
 use crate::almanac::{AlmanacOutcome, CompletionResult, SystemAction};
-use crate::error::AaruError;
+use crate::error::AstraError;
 use crate::filesystem::{DeleteSummary, Permissions, ResourceInfo, SearchResults};
 use crate::fs_provider::MountView;
 use crate::kernel::SystemConfig;
@@ -31,27 +31,27 @@ pub struct BootReport {
     pub resume_session: Option<crate::persistence::ResumeSession>,
 }
 
-fn read_system(state: &AppState) -> Result<RwLockReadGuard<'_, SystemState>, AaruError> {
+fn read_system(state: &AppState) -> Result<RwLockReadGuard<'_, SystemState>, AstraError> {
     state
         .0
         .read()
-        .map_err(|_| AaruError::Process("Failed to acquire system read lock".to_string()))
+        .map_err(|_| AstraError::Process("Failed to acquire system read lock".to_string()))
 }
 
-fn write_system(state: &AppState) -> Result<RwLockWriteGuard<'_, SystemState>, AaruError> {
+fn write_system(state: &AppState) -> Result<RwLockWriteGuard<'_, SystemState>, AstraError> {
     state
         .0
         .write()
-        .map_err(|_| AaruError::Process("Failed to acquire system write lock".to_string()))
+        .map_err(|_| AstraError::Process("Failed to acquire system write lock".to_string()))
 }
 
 #[tauri::command]
-pub fn get_system_config() -> Result<SystemConfig, AaruError> {
+pub fn get_system_config() -> Result<SystemConfig, AstraError> {
     Ok(SystemConfig::default())
 }
 
 #[tauri::command]
-pub fn boot_status(state: tauri::State<'_, AppState>) -> Result<BootReport, AaruError> {
+pub fn boot_status(state: tauri::State<'_, AppState>) -> Result<BootReport, AstraError> {
     let mut system = write_system(&state)?;
     let resumed = system.has_resumed_runtime();
     let resume_session = system.take_resume_session();
@@ -69,7 +69,7 @@ pub fn boot_status(state: tauri::State<'_, AppState>) -> Result<BootReport, Aaru
                 ok: true,
             },
             BootCheck {
-                name: "Aaru RAM",
+                name: "Astra RAM",
                 detail: format!("{} MB simulated", crate::kernel::RAM_MB),
                 ok: true,
             },
@@ -113,19 +113,19 @@ pub fn lifecycle_hibernate(
     cwd: String,
     ui_session: serde_json::Value,
     almanac_session: serde_json::Value,
-) -> Result<(), AaruError> {
+) -> Result<(), AstraError> {
     write_system(&state)?.prepare_hibernate(cwd, ui_session, almanac_session)
 }
 
 #[tauri::command]
 pub fn lifecycle_resume(
     state: tauri::State<'_, AppState>,
-) -> Result<Option<crate::persistence::ResumeSession>, AaruError> {
+) -> Result<Option<crate::persistence::ResumeSession>, AstraError> {
     Ok(write_system(&state)?.resume_runtime())
 }
 
 #[tauri::command]
-pub fn auth_status(state: tauri::State<'_, AppState>) -> Result<AuthenticationStatus, AaruError> {
+pub fn auth_status(state: tauri::State<'_, AppState>) -> Result<AuthenticationStatus, AstraError> {
     Ok(read_system(&state)?.authentication_status())
 }
 
@@ -133,7 +133,7 @@ pub fn auth_status(state: tauri::State<'_, AppState>) -> Result<AuthenticationSt
 pub fn configure_login(
     state: tauri::State<'_, AppState>,
     mut password: String,
-) -> Result<AuthenticationStatus, AaruError> {
+) -> Result<AuthenticationStatus, AstraError> {
     let result = write_system(&state)?.configure_login(&password);
     password.zeroize();
     result
@@ -143,14 +143,14 @@ pub fn configure_login(
 pub fn login(
     state: tauri::State<'_, AppState>,
     mut password: String,
-) -> Result<AuthenticationStatus, AaruError> {
+) -> Result<AuthenticationStatus, AstraError> {
     let result = write_system(&state)?.login(&password);
     password.zeroize();
     result
 }
 
 #[tauri::command]
-pub fn logout(state: tauri::State<'_, AppState>) -> Result<AuthenticationStatus, AaruError> {
+pub fn logout(state: tauri::State<'_, AppState>) -> Result<AuthenticationStatus, AstraError> {
     Ok(write_system(&state)?.logout())
 }
 
@@ -166,7 +166,7 @@ pub fn almanac_eval(
     state: tauri::State<'_, AppState>,
     cwd: String,
     line: String,
-) -> Result<AlmanacOutcome, AaruError> {
+) -> Result<AlmanacOutcome, AstraError> {
     let mut outcome = {
         let mut system = write_system(&state)?;
         let outcome = crate::almanac::evaluate(&mut system, &cwd, &line);
@@ -187,7 +187,7 @@ pub fn almanac_respond(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     mut response: String,
-) -> Result<AlmanacOutcome, AaruError> {
+) -> Result<AlmanacOutcome, AstraError> {
     let mut outcome = {
         let mut system = write_system(&state)?;
         crate::almanac::respond(&mut system, &response)
@@ -201,7 +201,7 @@ pub fn almanac_respond(
 #[tauri::command]
 pub fn almanac_cancel_prompt(
     state: tauri::State<'_, AppState>,
-) -> Result<AlmanacOutcome, AaruError> {
+) -> Result<AlmanacOutcome, AstraError> {
     let mut system = write_system(&state)?;
     Ok(crate::almanac::cancel(&mut system))
 }
@@ -212,14 +212,14 @@ pub fn almanac_complete(
     state: tauri::State<'_, AppState>,
     cwd: String,
     line: String,
-) -> Result<CompletionResult, AaruError> {
+) -> Result<CompletionResult, AstraError> {
     let system = read_system(&state)?;
     Ok(crate::almanac::complete(&system, &cwd, &line))
 }
 
 /// Persistent command history (oldest first), for Up/Down navigation.
 #[tauri::command]
-pub fn almanac_history(state: tauri::State<'_, AppState>) -> Result<Vec<String>, AaruError> {
+pub fn almanac_history(state: tauri::State<'_, AppState>) -> Result<Vec<String>, AstraError> {
     Ok(read_system(&state)?.command_history().to_vec())
 }
 
@@ -231,13 +231,13 @@ pub fn almanac_history(state: tauri::State<'_, AppState>) -> Result<Vec<String>,
 /// through untrusted JS as a raw string; it is canonicalised and
 /// containment-checked when it becomes a mount).
 #[tauri::command]
-pub async fn host_pick_directory(app: tauri::AppHandle) -> Result<Option<String>, AaruError> {
+pub async fn host_pick_directory(app: tauri::AppHandle) -> Result<Option<String>, AstraError> {
     let picked = tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
         app.dialog().file().blocking_pick_folder()
     })
     .await
-    .map_err(|error| AaruError::Process(error.to_string()))?;
+    .map_err(|error| AstraError::Process(error.to_string()))?;
 
     Ok(picked
         .and_then(|file| file.into_path().ok())
@@ -250,21 +250,21 @@ pub fn host_mount(
     state: tauri::State<'_, AppState>,
     path: String,
     alias: Option<String>,
-) -> Result<String, AaruError> {
+) -> Result<String, AstraError> {
     write_system(&state)?.host_mount(Path::new(&path), alias.as_deref())
 }
 
 #[tauri::command]
-pub fn host_unmount(state: tauri::State<'_, AppState>, alias: String) -> Result<(), AaruError> {
+pub fn host_unmount(state: tauri::State<'_, AppState>, alias: String) -> Result<(), AstraError> {
     write_system(&state)?.host_unmount(&alias)
 }
 
 #[tauri::command]
-pub fn host_mounts(state: tauri::State<'_, AppState>) -> Result<Vec<MountView>, AaruError> {
+pub fn host_mounts(state: tauri::State<'_, AppState>) -> Result<Vec<MountView>, AstraError> {
     read_system(&state)?.host_mount_list()
 }
 
-/// Authenticate an Aaru lock on a host directory for this session. No terminal
+/// Authenticate an Astra lock on a host directory for this session. No terminal
 /// verb drives this yet — it is the stable boundary a future host-security
 /// panel will call, mirroring `fs_authenticate_resource` for virtual locks.
 #[tauri::command]
@@ -273,28 +273,28 @@ pub fn host_authenticate(
     cwd: String,
     path: String,
     mut password: String,
-) -> Result<ResourceAuthenticationStatus, AaruError> {
+) -> Result<ResourceAuthenticationStatus, AstraError> {
     let result = (|| {
         let mut system = write_system(&state)?;
         match system.route(&cwd, &path)? {
-            crate::fs_provider::AaruLocation::Host { mount, relative } => {
+            crate::fs_provider::AstraLocation::Host { mount, relative } => {
                 system.host_authenticate(&mount, &relative, &password)
             }
-            _ => Err(AaruError::InvalidPath("not a host path".to_string())),
+            _ => Err(AstraError::InvalidPath("not a host path".to_string())),
         }
     })();
     password.zeroize();
     result
 }
 
-/// Resolve a real host working directory that mirrors the Aaru cwd under the
-/// app data directory. Aaru names are validated (no path separators, none of
+/// Resolve a real host working directory that mirrors the Astra cwd under the
+/// app data directory. Astra names are validated (no path separators, none of
 /// `< > : " / \ | ? *`), so they are safe path components. Returns `None` when
 /// no data dir is available.
-fn host_working_directory(app: &tauri::AppHandle, aaru_cwd: &str) -> Option<PathBuf> {
+fn host_working_directory(app: &tauri::AppHandle, astra_cwd: &str) -> Option<PathBuf> {
     let mut base = app.path().app_data_dir().ok()?;
     base.push("host-workspace");
-    for component in aaru_cwd.split('>') {
+    for component in astra_cwd.split('>') {
         let component = component.trim();
         if component.is_empty() || component == "ROOT" || component == "." {
             continue;
@@ -316,7 +316,7 @@ fn host_working_directory(app: &tauri::AppHandle, aaru_cwd: &str) -> Option<Path
 #[tauri::command]
 pub fn process_list(
     state: tauri::State<'_, AppState>,
-) -> Result<Vec<crate::process::PcbView>, AaruError> {
+) -> Result<Vec<crate::process::PcbView>, AstraError> {
     write_system(&state)?.process_list()
 }
 
@@ -324,7 +324,7 @@ pub fn process_list(
 pub fn process_terminate(
     state: tauri::State<'_, AppState>,
     pid: u32,
-) -> Result<crate::process::PcbView, AaruError> {
+) -> Result<crate::process::PcbView, AstraError> {
     write_system(&state)?.process_terminate(pid)
 }
 
@@ -332,7 +332,7 @@ pub fn process_terminate(
 pub fn process_suspend(
     state: tauri::State<'_, AppState>,
     pid: u32,
-) -> Result<crate::process::PcbView, AaruError> {
+) -> Result<crate::process::PcbView, AstraError> {
     write_system(&state)?.process_suspend(pid)
 }
 
@@ -340,7 +340,7 @@ pub fn process_suspend(
 pub fn process_resume(
     state: tauri::State<'_, AppState>,
     pid: u32,
-) -> Result<crate::process::PcbView, AaruError> {
+) -> Result<crate::process::PcbView, AstraError> {
     write_system(&state)?.process_resume(pid)
 }
 
@@ -351,7 +351,7 @@ pub fn process_resume(
 #[tauri::command]
 pub fn scheduler_status(
     state: tauri::State<'_, AppState>,
-) -> Result<crate::scheduler::SchedulerSnapshot, AaruError> {
+) -> Result<crate::scheduler::SchedulerSnapshot, AstraError> {
     read_system(&state)?.scheduler_snapshot()
 }
 
@@ -359,7 +359,7 @@ pub fn scheduler_status(
 pub fn scheduler_set_algorithm(
     state: tauri::State<'_, AppState>,
     algorithm: String,
-) -> Result<crate::scheduler::SchedulerSnapshot, AaruError> {
+) -> Result<crate::scheduler::SchedulerSnapshot, AstraError> {
     let algorithm = crate::scheduler::parse_algorithm(&algorithm)?;
     write_system(&state)?.scheduler_set_algorithm(algorithm)
 }
@@ -369,7 +369,7 @@ pub fn scheduler_set_algorithm(
 pub fn scheduler_tick(
     state: tauri::State<'_, AppState>,
     count: Option<u64>,
-) -> Result<crate::scheduler::SchedulerSnapshot, AaruError> {
+) -> Result<crate::scheduler::SchedulerSnapshot, AstraError> {
     let mut system = write_system(&state)?;
     system.require_authentication()?;
     system.scheduler_tick(count.unwrap_or(1).clamp(1, 100_000));
@@ -383,7 +383,7 @@ pub fn scheduler_tick(
 #[tauri::command]
 pub fn memory_status(
     state: tauri::State<'_, AppState>,
-) -> Result<crate::memory::MemorySnapshot, AaruError> {
+) -> Result<crate::memory::MemorySnapshot, AstraError> {
     read_system(&state)?.memory_snapshot()
 }
 
@@ -391,9 +391,9 @@ pub fn memory_status(
 pub fn memory_set_policy(
     state: tauri::State<'_, AppState>,
     policy: String,
-) -> Result<crate::memory::MemorySnapshot, AaruError> {
+) -> Result<crate::memory::MemorySnapshot, AstraError> {
     let policy = crate::memory::parse_replacement_policy(&policy).ok_or_else(|| {
-        AaruError::InvalidArgument(format!(
+        AstraError::InvalidArgument(format!(
             "unknown replacement policy '{policy}' — use FIFO or LRU"
         ))
     })?;
@@ -409,7 +409,7 @@ fn render_host_command(command: &crate::shell::HostCommand) -> String {
 }
 
 /// Carry out the side effects an [`AlmanacOutcome`] asks for: spawn + stream a
-/// host process (registering it in the Aaru process table), open a host file
+/// host process (registering it in the Astra process table), open a host file
 /// with its default application, or perform a whole-session action.
 fn finish_outcome(
     app: &tauri::AppHandle,
@@ -450,17 +450,17 @@ fn finish_outcome(
         let app_handle = app.clone();
         let app_state = state.clone();
         std::thread::spawn(move || {
-            let mut aaru_pid: Option<crate::process::Pid> = None;
+            let mut astra_pid: Option<crate::process::Pid> = None;
             let mut emit = |event: StreamEvent| {
                 match &event {
                     StreamEvent::Started { pid } => {
                         if let Ok(mut system) = app_state.0.write() {
-                            aaru_pid =
+                            astra_pid =
                                 Some(system.register_shell_process(&program, &display, *pid).pid);
                         }
                     }
                     StreamEvent::Exit { .. } => {
-                        if let (Some(pid), Ok(mut system)) = (aaru_pid, app_state.0.write()) {
+                        if let (Some(pid), Ok(mut system)) = (astra_pid, app_state.0.write()) {
                             system.mark_shell_process_exited(pid);
                         }
                     }
@@ -503,7 +503,7 @@ fn finish_outcome(
 }
 
 #[tauri::command]
-pub fn fs_root(state: tauri::State<'_, AppState>) -> Result<ResourceInfo, AaruError> {
+pub fn fs_root(state: tauri::State<'_, AppState>) -> Result<ResourceInfo, AstraError> {
     read_system(&state)?.root()
 }
 
@@ -512,7 +512,7 @@ pub fn fs_resolve_path(
     state: tauri::State<'_, AppState>,
     cwd: String,
     path: String,
-) -> Result<u64, AaruError> {
+) -> Result<u64, AstraError> {
     read_system(&state)?.resolve_path(&cwd, &path)
 }
 
@@ -521,7 +521,7 @@ pub fn fs_open_directory(
     state: tauri::State<'_, AppState>,
     cwd: String,
     path: String,
-) -> Result<ResourceInfo, AaruError> {
+) -> Result<ResourceInfo, AstraError> {
     read_system(&state)?.open_directory(&cwd, &path)
 }
 
@@ -530,7 +530,7 @@ pub fn fs_parent_directory(
     state: tauri::State<'_, AppState>,
     cwd: String,
     path: String,
-) -> Result<ResourceInfo, AaruError> {
+) -> Result<ResourceInfo, AstraError> {
     read_system(&state)?.parent_directory(&cwd, &path)
 }
 
@@ -539,7 +539,7 @@ pub fn fs_list(
     state: tauri::State<'_, AppState>,
     cwd: String,
     path: String,
-) -> Result<Vec<ResourceInfo>, AaruError> {
+) -> Result<Vec<ResourceInfo>, AstraError> {
     read_system(&state)?.list_directory(&cwd, &path)
 }
 
@@ -548,7 +548,7 @@ pub fn fs_create_directory(
     state: tauri::State<'_, AppState>,
     cwd: String,
     path: String,
-) -> Result<ResourceInfo, AaruError> {
+) -> Result<ResourceInfo, AstraError> {
     write_system(&state)?.create_directory(&cwd, &path)
 }
 
@@ -558,7 +558,7 @@ pub fn fs_create_file(
     cwd: String,
     path: String,
     content: String,
-) -> Result<ResourceInfo, AaruError> {
+) -> Result<ResourceInfo, AstraError> {
     write_system(&state)?.create_file(&cwd, &path, &content)
 }
 
@@ -567,7 +567,7 @@ pub fn fs_read_file(
     state: tauri::State<'_, AppState>,
     cwd: String,
     path: String,
-) -> Result<String, AaruError> {
+) -> Result<String, AstraError> {
     read_system(&state)?.read_file(&cwd, &path)
 }
 
@@ -577,7 +577,7 @@ pub fn fs_write_file(
     cwd: String,
     path: String,
     content: String,
-) -> Result<ResourceInfo, AaruError> {
+) -> Result<ResourceInfo, AstraError> {
     write_system(&state)?.write_file(&cwd, &path, &content)
 }
 
@@ -586,7 +586,7 @@ pub fn fs_create_tree(
     state: tauri::State<'_, AppState>,
     cwd: String,
     expression: String,
-) -> Result<ResourceInfo, AaruError> {
+) -> Result<ResourceInfo, AstraError> {
     write_system(&state)?.create_tree(&cwd, &expression)
 }
 
@@ -596,7 +596,7 @@ pub fn fs_rename(
     cwd: String,
     path: String,
     new_name: String,
-) -> Result<ResourceInfo, AaruError> {
+) -> Result<ResourceInfo, AstraError> {
     write_system(&state)?.rename(&cwd, &path, &new_name)
 }
 
@@ -606,7 +606,7 @@ pub fn fs_move(
     cwd: String,
     source_path: String,
     destination_directory: String,
-) -> Result<ResourceInfo, AaruError> {
+) -> Result<ResourceInfo, AstraError> {
     write_system(&state)?.move_resource(&cwd, &source_path, &destination_directory)
 }
 
@@ -616,7 +616,7 @@ pub fn fs_copy(
     cwd: String,
     source_path: String,
     destination_directory: String,
-) -> Result<ResourceInfo, AaruError> {
+) -> Result<ResourceInfo, AstraError> {
     write_system(&state)?.copy_resource(&cwd, &source_path, &destination_directory)
 }
 
@@ -625,7 +625,7 @@ pub fn fs_delete_preview(
     state: tauri::State<'_, AppState>,
     cwd: String,
     path: String,
-) -> Result<DeleteSummary, AaruError> {
+) -> Result<DeleteSummary, AstraError> {
     read_system(&state)?.delete_preview(&cwd, &path)
 }
 
@@ -634,7 +634,7 @@ pub fn fs_delete(
     state: tauri::State<'_, AppState>,
     cwd: String,
     path: String,
-) -> Result<DeleteSummary, AaruError> {
+) -> Result<DeleteSummary, AstraError> {
     write_system(&state)?.delete_recursive(&cwd, &path)
 }
 
@@ -645,7 +645,7 @@ pub fn fs_search(
     start_path: String,
     query: String,
     skip_inaccessible: bool,
-) -> Result<SearchResults, AaruError> {
+) -> Result<SearchResults, AstraError> {
     let _ = skip_inaccessible;
     read_system(&state)?.search(&cwd, &start_path, &query)
 }
@@ -655,7 +655,7 @@ pub fn fs_inspect(
     state: tauri::State<'_, AppState>,
     cwd: String,
     path: String,
-) -> Result<ResourceInfo, AaruError> {
+) -> Result<ResourceInfo, AstraError> {
     read_system(&state)?.inspect(&cwd, &path)
 }
 
@@ -665,7 +665,7 @@ pub fn fs_set_permissions(
     cwd: String,
     path: String,
     permissions: Permissions,
-) -> Result<ResourceInfo, AaruError> {
+) -> Result<ResourceInfo, AstraError> {
     write_system(&state)?.set_permissions(&cwd, &path, permissions)
 }
 
@@ -675,7 +675,7 @@ pub fn fs_lock(
     cwd: String,
     path: String,
     mut password: String,
-) -> Result<ResourceSecurityInfo, AaruError> {
+) -> Result<ResourceSecurityInfo, AstraError> {
     let result = write_system(&state)?.lock_resource(&cwd, &path, &password);
     password.zeroize();
     result
@@ -687,7 +687,7 @@ pub fn fs_authenticate_resource(
     cwd: String,
     path: String,
     mut password: String,
-) -> Result<ResourceAuthenticationStatus, AaruError> {
+) -> Result<ResourceAuthenticationStatus, AstraError> {
     let result = write_system(&state)?.authenticate_resource(&cwd, &path, &password);
     password.zeroize();
     result
@@ -699,7 +699,7 @@ pub fn fs_unlock(
     cwd: String,
     path: String,
     mut password: String,
-) -> Result<ResourceSecurityInfo, AaruError> {
+) -> Result<ResourceSecurityInfo, AstraError> {
     let result = write_system(&state)?.unlock_resource(&cwd, &path, &password);
     password.zeroize();
     result
@@ -710,11 +710,11 @@ pub fn fs_security_info(
     state: tauri::State<'_, AppState>,
     cwd: String,
     path: String,
-) -> Result<ResourceSecurityInfo, AaruError> {
+) -> Result<ResourceSecurityInfo, AstraError> {
     read_system(&state)?.resource_security_info(&cwd, &path)
 }
 
-/// The host applications Aaru knows how to launch, and whether each is
+/// The host applications Astra knows how to launch, and whether each is
 /// installed on this machine. Pure detection — no processes are started.
 #[tauri::command]
 pub fn host_apps() -> Vec<crate::process::HostAppInfo> {

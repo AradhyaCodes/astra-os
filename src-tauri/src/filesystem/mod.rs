@@ -1,4 +1,4 @@
-//! Aaru-OS — Filesystem module
+//! Astra OS — Filesystem module
 //!
 //! Rust-owned virtual in-memory filesystem with the following rules:
 //! - Case-sensitive names

@@ -1,5 +1,5 @@
 use super::model::{ResourceType, ROOT_NAME};
-use crate::error::AaruError;
+use crate::error::AstraError;
 
 pub const MAX_DEPTH: u8 = 64;
 
@@ -12,9 +12,9 @@ pub const MAX_TOTAL_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// Reject a write that would take the filesystem past [`MAX_TOTAL_FILE_BYTES`].
 /// `current_total` is the sum of all file sizes now; `delta` is how much this
 /// write adds (new size minus the size it replaces).
-pub fn ensure_within_budget(current_total: u64, delta: u64) -> Result<(), AaruError> {
+pub fn ensure_within_budget(current_total: u64, delta: u64) -> Result<(), AstraError> {
     if current_total.saturating_add(delta) > MAX_TOTAL_FILE_BYTES {
-        return Err(AaruError::Filesystem(format!(
+        return Err(AstraError::Filesystem(format!(
             "virtual filesystem is full — {} MiB limit reached (delete files or copy fewer in)",
             MAX_TOTAL_FILE_BYTES / (1024 * 1024)
         )));
@@ -22,7 +22,7 @@ pub fn ensure_within_budget(current_total: u64, delta: u64) -> Result<(), AaruEr
     Ok(())
 }
 
-pub fn validate_name(name: &str, resource_type: ResourceType) -> Result<(), AaruError> {
+pub fn validate_name(name: &str, resource_type: ResourceType) -> Result<(), AstraError> {
     if name.is_empty() {
         return invalid_name(name, "name cannot be empty");
     }
@@ -56,9 +56,9 @@ pub fn validate_name(name: &str, resource_type: ResourceType) -> Result<(), Aaru
     Ok(())
 }
 
-pub fn ensure_depth(path: &str, depth: usize) -> Result<(), AaruError> {
+pub fn ensure_depth(path: &str, depth: usize) -> Result<(), AstraError> {
     if depth > usize::from(MAX_DEPTH) {
-        return Err(AaruError::MaxDepthExceeded {
+        return Err(AstraError::MaxDepthExceeded {
             max: MAX_DEPTH,
             path: path.to_string(),
         });
@@ -66,8 +66,8 @@ pub fn ensure_depth(path: &str, depth: usize) -> Result<(), AaruError> {
     Ok(())
 }
 
-fn invalid_name<T>(name: &str, reason: &str) -> Result<T, AaruError> {
-    Err(AaruError::InvalidName {
+fn invalid_name<T>(name: &str, reason: &str) -> Result<T, AstraError> {
+    Err(AstraError::InvalidName {
         name: name.to_string(),
         reason: reason.to_string(),
     })

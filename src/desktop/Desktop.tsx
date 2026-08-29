@@ -95,7 +95,8 @@ export function Desktop({
   useEffect(() => {
     document.documentElement.classList.toggle(
       "reduce-glass",
-      localStorage.getItem("aaru-reduced-glass") === "1",
+      (localStorage.getItem("astra-reduced-glass") ??
+        localStorage.getItem("aaru-reduced-glass")) === "1",
     );
     const constrain = () => constrainOpenWindows(window.innerWidth, window.innerHeight);
     constrain();
@@ -113,8 +114,8 @@ export function Desktop({
 
   useEffect(() => {
     const hibernate = () => setHibernating(true);
-    window.addEventListener("aaru:hibernate", hibernate);
-    return () => window.removeEventListener("aaru:hibernate", hibernate);
+    window.addEventListener("astra:hibernate", hibernate);
+    return () => window.removeEventListener("astra:hibernate", hibernate);
   }, []);
 
   useEffect(() => {
@@ -179,7 +180,7 @@ export function Desktop({
   const runAlmanacCommand = (command: string) => {
     openApp("almanac", "Almanac", 900, 620);
     window.setTimeout(
-      () => window.dispatchEvent(new CustomEvent("aaru:command", { detail: command })),
+      () => window.dispatchEvent(new CustomEvent("astra:command", { detail: command })),
       50,
     );
   };
@@ -215,7 +216,7 @@ export function Desktop({
             }}
             onDoubleClick={() => activateResource(resource)}
             onKeyDown={(event) => handleKey(event, resource)}
-            aria-label={`${resource.name}, ${resource.kind === "host" ? "host laptop resource" : resource.kind === "virtual" ? "Aaru virtual resource" : "Aaru application"}`}
+            aria-label={`${resource.name}, ${resource.kind === "host" ? "host laptop resource" : resource.kind === "virtual" ? "Astra virtual resource" : "Astra application"}`}
           >
             <span className={`desktop-icon-art ${resource.kind}`}>
               <AppIcon name={resource.icon} />
@@ -264,11 +265,11 @@ export function Desktop({
             <AppIcon name={hint.icon} />
           </div>
           <div>
-            <span>{hint.kind === "host" ? "LAPTOP RESOURCE" : "AARU RESOURCE"}</span>
+            <span>{hint.kind === "host" ? "LAPTOP RESOURCE" : "ASTRA RESOURCE"}</span>
             <strong>{hint.name}</strong>
             <p>
               {hint.kind === "host"
-                ? "Mounted laptop directories live here. Aaru does not encrypt or lock Windows files."
+                ? "Mounted laptop directories live here. Astra does not encrypt or lock Windows files."
                 : "Open this resource through Almanac to preserve the system command flow."}
             </p>
             <code>{hint.command}</code>
@@ -344,8 +345,8 @@ export function Desktop({
             setHibernating(false);
           }}
         >
-          <AppIcon name="aaru" />
-          <strong>Aaru is hibernating</strong>
+          <AppIcon name="astra" />
+          <strong>Astra is hibernating</strong>
           <span>Simulated runtime, windows, and Almanac state are saved.</span>
           <small>Click to resume this session</small>
         </button>

@@ -1,13 +1,13 @@
-//! Aaru-OS — Application launcher & process manager (Phase 5).
+//! Astra OS — Application launcher & process manager (Phase 5).
 //!
-//! Aaru keeps its own **Process Control Block** table. Two kinds of process
+//! Astra keeps its own **Process Control Block** table. Two kinds of process
 //! live in it:
 //!
-//! * *simulated* Aaru processes (`SYSTEM`, `AARU_APP`, `AARU_GAME`) — Aaru owns
+//! * *simulated* Astra processes (`SYSTEM`, `ASTRA_APP`, `ASTRA_GAME`) — Astra owns
 //!   their (simulated) state, priority and workload metrics;
 //! * *host-backed* processes (`HOST_APP`, `HOST_COMMAND`) — Windows owns their
-//!   real execution. Aaru only **tracks/observes** them and can terminate the
-//!   ones it launched. Aaru never claims to drive the Windows scheduler and
+//!   real execution. Astra only **tracks/observes** them and can terminate the
+//!   ones it launched. Astra never claims to drive the Windows scheduler and
 //!   never fabricates exact host CPU numbers.
 //!
 //! The CPU scheduler itself is deliberately **not** implemented in this phase.
@@ -15,14 +15,14 @@
 pub mod host_apps;
 pub mod registry;
 
-use crate::error::AaruError;
+use crate::error::AstraError;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::process::Child;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use host_apps::{list_host_apps, resolve_host_app, HostAppInfo, HostAppResolution};
-pub use registry::{find_builtin, AaruAppDef, BuiltinKind};
+pub use registry::{find_builtin, AstraAppDef, BuiltinKind};
 
 pub type Pid = u32;
 
@@ -34,8 +34,10 @@ const FIRST_DYNAMIC_PID: Pid = 3;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ProcessType {
     System,
-    AaruApp,
-    AaruGame,
+    #[serde(alias = "AARU_APP")]
+    AstraApp,
+    #[serde(alias = "AARU_GAME")]
+    AstraGame,
     HostApp,
     HostCommand,
 }
@@ -49,7 +51,7 @@ impl ProcessType {
     /// processes are observed only; `System` processes are always-on services
     /// and are not placed on a virtual core.
     pub(crate) fn is_schedulable(self) -> bool {
-        matches!(self, ProcessType::AaruApp | ProcessType::AaruGame)
+        matches!(self, ProcessType::AstraApp | ProcessType::AstraGame)
     }
 }
 
@@ -109,12 +111,12 @@ struct Pcb {
     sim_mem_mb: f64,
     workload: String,
     note: Option<String>,
-    /// Live handle for host processes Aaru launched — the *only* way Aaru can
+    /// Live handle for host processes Astra launched — the *only* way Astra can
     /// terminate a real process (so it can never target an arbitrary PID).
     child: Option<Child>,
     /// True only while this runtime can prove it launched the host PID. A
     /// restored hibernate record is observation-only because Windows may have
-    /// reused the numeric PID while Aaru was away.
+    /// reused the numeric PID while Astra was away.
     termination_authorized: bool,
 }
 
@@ -145,7 +147,7 @@ pub struct ProcessRuntimeSnapshot {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LifecycleProcessSummary {
-    pub running_aaru: usize,
+    pub running_astra: usize,
     pub running_host: usize,
     pub host_names: Vec<String>,
 }
@@ -166,7 +168,7 @@ pub struct PcbView {
     pub host_backed: bool,
     pub host_pid: Option<u32>,
     pub protected: bool,
-    /// True when the metrics and scheduling state are Aaru simulations rather
+    /// True when the metrics and scheduling state are Astra simulations rather
     /// than real OS numbers. Drives the SIMULATED / HOST label in Task Manager.
     pub simulated: bool,
     pub workload: String,
@@ -205,7 +207,7 @@ impl Pcb {
     }
 }
 
-/// Best-effort kill of an OS PID Aaru launched. Errors are swallowed — the
+/// Best-effort kill of an OS PID Astra launched. Errors are swallowed — the
 /// process may already be gone.
 fn kill_os_pid(pid: u32) {
     let mut command = if cfg!(windows) {
@@ -260,7 +262,7 @@ impl ProcessManager {
             Pcb {
                 pid: KERNEL_PID,
                 parent_pid: None,
-                name: "aaru-kernel".to_string(),
+                name: "astra-kernel".to_string(),
                 command: "<kernel>".to_string(),
                 process_type: ProcessType::System,
                 state: ProcessState::Running,
@@ -283,7 +285,7 @@ impl ProcessManager {
                 pid: ALMANAC_PID,
                 parent_pid: Some(KERNEL_PID),
                 name: "Almanac".to_string(),
-                command: "aaru:almanac".to_string(),
+                command: "astra:almanac".to_string(),
                 process_type: ProcessType::System,
                 state: ProcessState::Running,
                 priority: Priority::System,
@@ -322,17 +324,17 @@ impl ProcessManager {
     // ------------------------------------------------------------------
 
     /// Register a simulated built-in application or game.
-    pub fn spawn_builtin(&mut self, def: &AaruAppDef, parent: Pid) -> LaunchReport {
+    pub fn spawn_builtin(&mut self, def: &AstraAppDef, parent: Pid) -> LaunchReport {
         let pid = self.allocate_pid();
         let process_type = match def.kind {
-            BuiltinKind::Game => ProcessType::AaruGame,
-            BuiltinKind::App => ProcessType::AaruApp,
+            BuiltinKind::Game => ProcessType::AstraGame,
+            BuiltinKind::App => ProcessType::AstraApp,
         };
         let pcb = Pcb {
             pid,
             parent_pid: Some(parent),
             name: def.name.to_string(),
-            command: format!("aaru:{}", def.key.to_lowercase()),
+            command: format!("astra:{}", def.key.to_lowercase()),
             process_type,
             // Enters the virtual CPU's READY queue on launch; the Phase 6
             // scheduler promotes it to RUNNING when a core is free.
@@ -357,13 +359,13 @@ impl ProcessManager {
         }
     }
 
-    /// Register a host-backed process Aaru just spawned.
+    /// Register a host-backed process Astra just spawned.
     ///
-    /// `child` is `Some` when Aaru owns the `std::process::Child` handle (an
+    /// `child` is `Some` when Astra owns the `std::process::Child` handle (an
     /// app launched via `almanac run`); it is `None` for a streamed host-shell
-    /// command, where Aaru only recorded the OS PID at spawn time. Either way
-    /// the PID was captured by Aaru at launch, so termination can never target
-    /// a process Aaru did not start.
+    /// command, where Astra only recorded the OS PID at spawn time. Either way
+    /// the PID was captured by Astra at launch, so termination can never target
+    /// a process Astra did not start.
     #[allow(clippy::too_many_arguments)] // a PCB constructor, not a code smell
     pub fn register_host(
         &mut self,
@@ -417,36 +419,36 @@ impl ProcessManager {
     // Lifecycle
     // ------------------------------------------------------------------
 
-    fn pcb_mut(&mut self, pid: Pid) -> Result<&mut Pcb, AaruError> {
+    fn pcb_mut(&mut self, pid: Pid) -> Result<&mut Pcb, AstraError> {
         self.table.get_mut(&pid).ok_or_else(|| {
-            AaruError::Process(format!(
-                "no Aaru process with PID {pid} — Aaru only manages processes it launched or tracks"
+            AstraError::Process(format!(
+                "no Astra process with PID {pid} — Astra only manages processes it launched or tracks"
             ))
         })
     }
 
-    pub fn terminate(&mut self, pid: Pid) -> Result<PcbView, AaruError> {
+    pub fn terminate(&mut self, pid: Pid) -> Result<PcbView, AstraError> {
         {
             let pcb = self.pcb_mut(pid)?;
             if pcb.protected {
-                return Err(AaruError::PermissionDenied(format!(
+                return Err(AstraError::PermissionDenied(format!(
                     "PID {pid} ({}) is a protected system process",
                     pcb.name
                 )));
             }
             if pcb.state == ProcessState::Terminated {
-                return Err(AaruError::Process(format!(
+                return Err(AstraError::Process(format!(
                     "PID {pid} has already terminated"
                 )));
             }
             if let Some(child) = pcb.child.as_mut() {
-                // Aaru holds this Child, so it can only ever kill a process it
+                // Astra holds this Child, so it can only ever kill a process it
                 // started itself.
                 let _ = child.kill();
                 let _ = child.wait();
             } else if pcb.host_backed && pcb.termination_authorized {
                 if let Some(os_pid) = pcb.host_pid {
-                    // PID-only host-shell command: kill the tree Aaru launched,
+                    // PID-only host-shell command: kill the tree Astra launched,
                     // at the current user's privilege (never elevated).
                     kill_os_pid(os_pid);
                 }
@@ -457,17 +459,17 @@ impl ProcessManager {
         Ok(self.table[&pid].view())
     }
 
-    pub fn suspend(&mut self, pid: Pid) -> Result<PcbView, AaruError> {
+    pub fn suspend(&mut self, pid: Pid) -> Result<PcbView, AstraError> {
         let pcb = self.pcb_mut(pid)?;
         if pcb.protected {
-            return Err(AaruError::PermissionDenied(format!(
+            return Err(AstraError::PermissionDenied(format!(
                 "PID {pid} ({}) is a protected system process",
                 pcb.name
             )));
         }
         if pcb.host_backed {
-            return Err(AaruError::Process(format!(
-                "PID {pid} is host-backed — Windows controls its execution and Aaru cannot \
+            return Err(AstraError::Process(format!(
+                "PID {pid} is host-backed — Windows controls its execution and Astra cannot \
                  suspend it"
             )));
         }
@@ -476,17 +478,17 @@ impl ProcessManager {
                 pcb.state = ProcessState::Suspended;
                 Ok(pcb.view())
             }
-            other => Err(AaruError::Process(format!(
+            other => Err(AstraError::Process(format!(
                 "cannot suspend PID {pid} from state {other:?}"
             ))),
         }
     }
 
-    pub fn resume(&mut self, pid: Pid) -> Result<PcbView, AaruError> {
+    pub fn resume(&mut self, pid: Pid) -> Result<PcbView, AstraError> {
         let pcb = self.pcb_mut(pid)?;
         if pcb.host_backed {
-            return Err(AaruError::Process(format!(
-                "PID {pid} is host-backed — Aaru never suspended it"
+            return Err(AstraError::Process(format!(
+                "PID {pid} is host-backed — Astra never suspended it"
             )));
         }
         match pcb.state {
@@ -496,14 +498,14 @@ impl ProcessManager {
                 pcb.state = ProcessState::Ready;
                 Ok(pcb.view())
             }
-            other => Err(AaruError::Process(format!(
+            other => Err(AstraError::Process(format!(
                 "cannot resume PID {pid} from state {other:?}"
             ))),
         }
     }
 
     /// Apply a state transition decided by the Phase 6 virtual CPU scheduler.
-    /// Only ever touches schedulable Aaru processes, and never resurrects one
+    /// Only ever touches schedulable Astra processes, and never resurrects one
     /// the user already terminated or overrides a user suspend.
     pub(crate) fn set_state_from_scheduler(&mut self, pid: Pid, state: ProcessState) {
         if let Some(pcb) = self.table.get_mut(&pid) {
@@ -627,7 +629,7 @@ impl ProcessManager {
     pub fn lifecycle_summary(&mut self) -> LifecycleProcessSummary {
         self.reap();
         let mut host_names = Vec::new();
-        let mut running_aaru = 0;
+        let mut running_astra = 0;
         let mut running_host = 0;
         for pcb in self.table.values() {
             if pcb.protected || pcb.state == ProcessState::Terminated {
@@ -637,17 +639,17 @@ impl ProcessManager {
                 running_host += 1;
                 host_names.push(pcb.name.clone());
             } else {
-                running_aaru += 1;
+                running_astra += 1;
             }
         }
         LifecycleProcessSummary {
-            running_aaru,
+            running_astra,
             running_host,
             host_names,
         }
     }
 
-    /// Terminate only dynamic processes that this Aaru runtime can prove it
+    /// Terminate only dynamic processes that this Astra runtime can prove it
     /// owns. Protected services and observation-only restored host PIDs are
     /// never targeted.
     pub fn shutdown_managed(&mut self) {
@@ -703,6 +705,22 @@ mod tests {
     }
 
     #[test]
+    fn legacy_process_type_names_deserialize_after_the_rename() {
+        assert_eq!(
+            serde_json::from_str::<ProcessType>("\"AARU_APP\"").unwrap(),
+            ProcessType::AstraApp
+        );
+        assert_eq!(
+            serde_json::from_str::<ProcessType>("\"AARU_GAME\"").unwrap(),
+            ProcessType::AstraGame
+        );
+        assert_eq!(
+            serde_json::to_string(&ProcessType::AstraApp).unwrap(),
+            "\"ASTRA_APP\""
+        );
+    }
+
+    #[test]
     fn pids_are_unique_and_never_reused() {
         let mut manager = ProcessManager::new();
         let calc = find_builtin("calculator").unwrap();
@@ -722,7 +740,7 @@ mod tests {
         let mut manager = ProcessManager::new();
         let report = manager.spawn_builtin(find_builtin("Snake").unwrap(), manager.launcher_pid());
         assert_eq!(report.process.parent_pid, Some(ALMANAC_PID));
-        assert_eq!(report.process.process_type, ProcessType::AaruGame);
+        assert_eq!(report.process.process_type, ProcessType::AstraGame);
         assert!(report.process.simulated);
         assert!(manager.get(ALMANAC_PID).is_some());
     }
@@ -746,11 +764,11 @@ mod tests {
         let mut manager = ProcessManager::new();
         assert!(matches!(
             manager.terminate(KERNEL_PID),
-            Err(AaruError::PermissionDenied(_))
+            Err(AstraError::PermissionDenied(_))
         ));
         assert!(matches!(
             manager.suspend(ALMANAC_PID),
-            Err(AaruError::PermissionDenied(_))
+            Err(AstraError::PermissionDenied(_))
         ));
     }
 
@@ -759,7 +777,7 @@ mod tests {
         let mut manager = ProcessManager::new();
         assert!(matches!(
             manager.terminate(9999),
-            Err(AaruError::Process(_))
+            Err(AstraError::Process(_))
         ));
     }
 

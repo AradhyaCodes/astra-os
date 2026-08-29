@@ -1,9 +1,9 @@
 use super::model::ROOT_NAME;
-use crate::error::AaruError;
+use crate::error::AstraError;
 
-/// Resolve an Aaru path against a current directory and return its canonical
+/// Resolve an Astra path against a current directory and return its canonical
 /// form. A literal `>` or `\` inside a name is escaped with `\`.
-pub fn normalize_path(cwd: &str, input: &str) -> Result<String, AaruError> {
+pub fn normalize_path(cwd: &str, input: &str) -> Result<String, AstraError> {
     let cwd_components = parse_canonical_cwd(cwd)?;
     let normalized_input = input.trim();
     if normalized_input.is_empty() || normalized_input == "." {
@@ -18,23 +18,23 @@ pub fn normalize_path(cwd: &str, input: &str) -> Result<String, AaruError> {
             .map(str::to_string)
             .collect::<Vec<_>>()
     } else {
-        parse_aaru_components(normalized_input)?
+        parse_astra_components(normalized_input)?
     };
-    let aaru_absolute = input_components
+    let astra_absolute = input_components
         .first()
         .is_some_and(|part| part == ROOT_NAME);
-    if aaru_absolute {
+    if astra_absolute {
         input_components.remove(0);
     }
 
-    let mut resolved = if legacy_absolute || aaru_absolute {
+    let mut resolved = if legacy_absolute || astra_absolute {
         Vec::new()
     } else {
         cwd_components
     };
     for component in input_components {
         if component.is_empty() {
-            return Err(AaruError::InvalidPath(
+            return Err(AstraError::InvalidPath(
                 "path contains an empty component".to_string(),
             ));
         }
@@ -44,7 +44,7 @@ pub fn normalize_path(cwd: &str, input: &str) -> Result<String, AaruError> {
                 resolved.pop();
             }
             ROOT_NAME => {
-                return Err(AaruError::InvalidPath(format!(
+                return Err(AstraError::InvalidPath(format!(
                     "'{ROOT_NAME}' is only valid at the beginning of an absolute path"
                 )));
             }
@@ -56,9 +56,9 @@ pub fn normalize_path(cwd: &str, input: &str) -> Result<String, AaruError> {
 }
 
 /// Split a canonical or resolvable path into its canonical parent and raw name.
-pub fn split_path(path: &str) -> Result<(String, String), AaruError> {
+pub fn split_path(path: &str) -> Result<(String, String), AstraError> {
     let canonical = normalize_path(ROOT_NAME, path)?;
-    let mut raw_components = parse_aaru_components(&canonical)?;
+    let mut raw_components = parse_astra_components(&canonical)?;
     if raw_components == [ROOT_NAME] {
         return Ok((ROOT_NAME.to_string(), String::new()));
     }
@@ -68,18 +68,18 @@ pub fn split_path(path: &str) -> Result<(String, String), AaruError> {
     Ok((canonicalize(&raw_components), name))
 }
 
-pub fn parent_path(path: &str) -> Result<String, AaruError> {
+pub fn parent_path(path: &str) -> Result<String, AstraError> {
     Ok(split_path(path)?.0)
 }
 
-pub fn depth(path: &str) -> Result<usize, AaruError> {
+pub fn depth(path: &str) -> Result<usize, AstraError> {
     Ok(components(path)?.len())
 }
 
 /// Return raw, unescaped resource names for traversal.
-pub fn components(path: &str) -> Result<Vec<String>, AaruError> {
+pub fn components(path: &str) -> Result<Vec<String>, AstraError> {
     let canonical = normalize_path(ROOT_NAME, path)?;
-    let mut raw_components = parse_aaru_components(&canonical)?;
+    let mut raw_components = parse_astra_components(&canonical)?;
     if raw_components.first().is_some_and(|part| part == ROOT_NAME) {
         raw_components.remove(0);
     }
@@ -90,7 +90,7 @@ pub fn join(parent: &str, name: &str) -> String {
     format!("{parent}>{}", escape_component(name))
 }
 
-fn parse_canonical_cwd(cwd: &str) -> Result<Vec<String>, AaruError> {
+fn parse_canonical_cwd(cwd: &str) -> Result<Vec<String>, AstraError> {
     if cwd == "/" {
         return Ok(Vec::new());
     }
@@ -101,20 +101,20 @@ fn parse_canonical_cwd(cwd: &str) -> Result<Vec<String>, AaruError> {
             .map(str::to_string)
             .collect::<Vec<_>>()
     } else {
-        parse_aaru_components(cwd)?
+        parse_astra_components(cwd)?
     };
     if parsed.first().is_some_and(|part| part == ROOT_NAME) {
         parsed.remove(0);
     }
     if parsed.iter().any(String::is_empty) {
-        return Err(AaruError::InvalidPath(format!(
+        return Err(AstraError::InvalidPath(format!(
             "invalid current directory: {cwd}"
         )));
     }
     Ok(parsed)
 }
 
-fn parse_aaru_components(path: &str) -> Result<Vec<String>, AaruError> {
+fn parse_astra_components(path: &str) -> Result<Vec<String>, AstraError> {
     let mut components = Vec::new();
     let mut component = String::new();
     let mut escaped = false;
@@ -135,7 +135,7 @@ fn parse_aaru_components(path: &str) -> Result<Vec<String>, AaruError> {
         }
     }
     if escaped {
-        return Err(AaruError::InvalidPath(
+        return Err(AstraError::InvalidPath(
             "path ends with an incomplete escape".to_string(),
         ));
     }
@@ -172,10 +172,10 @@ mod tests {
     use super::{components, depth, join, normalize_path, parent_path, split_path};
 
     #[test]
-    fn resolves_absolute_and_relative_aaru_paths() {
+    fn resolves_absolute_and_relative_astra_paths() {
         assert_eq!(
-            normalize_path("ROOT>Documents", "Projects>AaruOS").unwrap(),
-            "ROOT>Documents>Projects>AaruOS"
+            normalize_path("ROOT>Documents", "Projects>AstraOS").unwrap(),
+            "ROOT>Documents>Projects>AstraOS"
         );
         assert_eq!(
             normalize_path("ROOT>Documents", "ROOT>Downloads").unwrap(),

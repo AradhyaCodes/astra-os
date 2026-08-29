@@ -1,4 +1,4 @@
-use crate::error::AaruError;
+use crate::error::AstraError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeNode {
@@ -6,7 +6,7 @@ pub struct TreeNode {
     pub children: Vec<TreeNode>,
 }
 
-pub fn parse_tree(input: &str) -> Result<TreeNode, AaruError> {
+pub fn parse_tree(input: &str) -> Result<TreeNode, AstraError> {
     let mut parser = TreeParser::new(input);
     let node = parser.parse_node()?;
     parser.skip_whitespace();
@@ -29,7 +29,7 @@ impl TreeParser {
         }
     }
 
-    fn parse_node(&mut self) -> Result<TreeNode, AaruError> {
+    fn parse_node(&mut self) -> Result<TreeNode, AstraError> {
         self.skip_whitespace();
         let name = self.parse_name()?;
         self.skip_whitespace();
@@ -65,14 +65,14 @@ impl TreeParser {
         Ok(TreeNode { name, children })
     }
 
-    fn parse_name(&mut self) -> Result<String, AaruError> {
+    fn parse_name(&mut self) -> Result<String, AstraError> {
         let mut name = String::new();
         while let Some(character) = self.peek() {
             match character {
                 '\\' => {
                     self.advance();
                     let escaped = self.peek().ok_or_else(|| {
-                        AaruError::TreeParse("trailing escape character".to_string())
+                        AstraError::TreeParse("trailing escape character".to_string())
                     })?;
                     name.push(escaped);
                     self.advance();
@@ -92,7 +92,7 @@ impl TreeParser {
         Ok(name)
     }
 
-    fn expect(&mut self, expected: char) -> Result<(), AaruError> {
+    fn expect(&mut self, expected: char) -> Result<(), AstraError> {
         if self.peek() != Some(expected) {
             return self.error(&format!("expected '{expected}'"));
         }
@@ -114,8 +114,8 @@ impl TreeParser {
         self.position += 1;
     }
 
-    fn error<T>(&self, message: &str) -> Result<T, AaruError> {
-        Err(AaruError::TreeParse(format!(
+    fn error<T>(&self, message: &str) -> Result<T, AstraError> {
+        Err(AstraError::TreeParse(format!(
             "{message} at character {}",
             self.position + 1
         )))

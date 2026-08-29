@@ -107,7 +107,7 @@ pub enum AlmanacCommand {
     Reveal {
         path: String,
     },
-    /// `almanac process` — list the Aaru process table.
+    /// `almanac process` — list the Astra process table.
     Process,
     Terminate {
         pid: u32,

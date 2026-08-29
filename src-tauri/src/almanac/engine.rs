@@ -15,9 +15,9 @@ use super::ast::{AlmanacCommand, EditorTarget};
 use super::lexer::is_almanac_line;
 use super::outcome::{AlmanacOutcome, AppLaunch, PromptRequest, StatusTag, SystemAction};
 use super::parser::parse_line;
-use crate::error::AaruError;
+use crate::error::AstraError;
 use crate::filesystem::ResourceType;
-use crate::fs_provider::{AaruLocation, EntryView, ProviderKind};
+use crate::fs_provider::{AstraLocation, EntryView, ProviderKind};
 use crate::process::PcbView;
 use crate::shell::{tokenize_host_line, HostCommand};
 use crate::state::{PendingPrompt, RunReport, SystemState};
@@ -112,7 +112,7 @@ fn launch_direct_app(
 ) -> AlmanacOutcome {
     match launch_application(state, cwd, application, &[]) {
         Ok(outcome) => outcome,
-        Err(AaruError::CommandNotFound(_)) if fallback_url.is_some() => {
+        Err(AstraError::CommandNotFound(_)) if fallback_url.is_some() => {
             let url = fallback_url.expect("guarded above");
             let mut outcome = AlmanacOutcome::line(
                 StatusTag::Process,
@@ -120,7 +120,7 @@ fn launch_direct_app(
             );
             outcome.push(
                 StatusTag::Info,
-                "handed to the default Windows browser — not tracked as an Aaru process",
+                "handed to the default Windows browser — not tracked as an Astra process",
             );
             outcome.launch = Some(AppLaunch {
                 app: "$url".to_string(),
@@ -181,13 +181,13 @@ fn launch_application(
     cwd: &str,
     application: &str,
     args: &[String],
-) -> Result<AlmanacOutcome, AaruError> {
+) -> Result<AlmanacOutcome, AstraError> {
     Ok(match state.run_application(cwd, application, args)? {
         RunReport::HostApp { process } => {
             let mut outcome = pcb_line("launched real", &process);
             outcome.push(
                 StatusTag::Info,
-                "Windows controls this process's execution; Aaru only tracks its state",
+                "Windows controls this process's execution; Astra only tracks its state",
             );
             outcome
         }
@@ -213,7 +213,7 @@ fn launch_application(
             );
             outcome.push(
                 StatusTag::Info,
-                "Windows owns this process — Aaru does not track it",
+                "Windows owns this process — Astra does not track it",
             );
             outcome
         }
@@ -256,7 +256,7 @@ fn inspect_lines(view: &EntryView) -> AlmanacOutcome {
         format!(
             "source: {}",
             match view.kind {
-                ProviderKind::Virtual => "AARU virtual filesystem",
+                ProviderKind::Virtual => "ASTRA virtual filesystem",
                 ProviderKind::Host => "Windows host filesystem",
             }
         ),
@@ -275,7 +275,10 @@ fn inspect_lines(view: &EntryView) -> AlmanacOutcome {
     outcome.push(StatusTag::Info, format!("read-only: {}", view.read_only));
     outcome.push(
         StatusTag::Info,
-        format!("Aaru lock: {}", if view.aaru_locked { "yes" } else { "no" }),
+        format!(
+            "Astra lock: {}",
+            if view.astra_locked { "yes" } else { "no" }
+        ),
     );
     if let Some(real) = &view.host_real_path {
         outcome.push(StatusTag::Info, format!("host path: {real}"));
@@ -302,14 +305,14 @@ fn host_display(mount: &str, relative: &[String]) -> String {
     }
 }
 
-fn back_target(state: &SystemState, cwd: &str) -> Result<AlmanacOutcome, AaruError> {
+fn back_target(state: &SystemState, cwd: &str) -> Result<AlmanacOutcome, AstraError> {
     match state.route(cwd, ".")? {
-        AaruLocation::Virtual(_) => {
+        AstraLocation::Virtual(_) => {
             let parent = state.parent_directory(cwd, ".")?;
             Ok(moved(parent.path))
         }
-        AaruLocation::HostRoot => Ok(moved("ROOT")),
-        AaruLocation::Host { mount, relative } => {
+        AstraLocation::HostRoot => Ok(moved("ROOT")),
+        AstraLocation::Host { mount, relative } => {
             if relative.is_empty() {
                 return Ok(moved("HOST"));
             }
@@ -320,14 +323,14 @@ fn back_target(state: &SystemState, cwd: &str) -> Result<AlmanacOutcome, AaruErr
     }
 }
 
-fn scan_current(state: &SystemState, cwd: &str) -> Result<AlmanacOutcome, AaruError> {
+fn scan_current(state: &SystemState, cwd: &str) -> Result<AlmanacOutcome, AstraError> {
     match state.route(cwd, ".")? {
-        AaruLocation::Virtual(canonical) => {
+        AstraLocation::Virtual(canonical) => {
             let entries = state.list_directory("ROOT", &canonical)?;
             let mut outcome = AlmanacOutcome::default();
             outcome.push(
                 StatusTag::Ok,
-                format!("AARU>{canonical} — {} item(s)", entries.len()),
+                format!("ASTRA>{canonical} — {} item(s)", entries.len()),
             );
             for entry in entries {
                 let kind = match entry.metadata.resource_type {
@@ -346,7 +349,7 @@ fn scan_current(state: &SystemState, cwd: &str) -> Result<AlmanacOutcome, AaruEr
             }
             Ok(outcome)
         }
-        AaruLocation::HostRoot => {
+        AstraLocation::HostRoot => {
             let mounts = state.host_mount_list()?;
             let mut outcome = AlmanacOutcome::default();
             outcome.push(StatusTag::Ok, format!("HOST — {} mount(s)", mounts.len()));
@@ -363,7 +366,7 @@ fn scan_current(state: &SystemState, cwd: &str) -> Result<AlmanacOutcome, AaruEr
             }
             Ok(outcome)
         }
-        AaruLocation::Host { mount, relative } => {
+        AstraLocation::Host { mount, relative } => {
             let entries = state.host_list(&mount, &relative)?;
             let mut outcome = AlmanacOutcome::default();
             outcome.push(
@@ -376,8 +379,8 @@ fn scan_current(state: &SystemState, cwd: &str) -> Result<AlmanacOutcome, AaruEr
             );
             for entry in entries {
                 let kind = if entry.is_dir { "dir" } else { "file" };
-                let lock = if entry.aaru_locked {
-                    " · aaru-locked"
+                let lock = if entry.astra_locked {
+                    " · astra-locked"
                 } else {
                     ""
                 };
@@ -394,10 +397,10 @@ fn relocate(
     from: &str,
     to: &str,
     copy: bool,
-) -> Result<AlmanacOutcome, AaruError> {
+) -> Result<AlmanacOutcome, AstraError> {
     let verb = if copy { "copied to" } else { "moved to" };
     match (state.route(cwd, from)?, state.route(cwd, to)?) {
-        (AaruLocation::Virtual(source), AaruLocation::Virtual(target)) => {
+        (AstraLocation::Virtual(source), AstraLocation::Virtual(target)) => {
             let info = if copy {
                 state.copy_resource("ROOT", &source, &target)?
             } else {
@@ -406,11 +409,11 @@ fn relocate(
             Ok(touched(verb, &info.path))
         }
         (
-            AaruLocation::Host {
+            AstraLocation::Host {
                 mount: from_mount,
                 relative: from_rel,
             },
-            AaruLocation::Host {
+            AstraLocation::Host {
                 mount: to_mount,
                 relative: to_rel,
             },
@@ -419,16 +422,16 @@ fn relocate(
             Ok(touched(verb, &view.display_path))
         }
 
-        // ---- cross-boundary: HOST → AARU ----
+        // ---- cross-boundary: HOST → ASTRA ----
         (
-            AaruLocation::Host {
+            AstraLocation::Host {
                 mount: from_mount,
                 relative: from_rel,
             },
-            AaruLocation::Virtual(target),
+            AstraLocation::Virtual(target),
         ) => {
             if from_rel.is_empty() {
-                return Err(AaruError::InvalidMove(
+                return Err(AstraError::InvalidMove(
                     "pick a file or folder inside the mount, not the HOST>… root itself"
                         .to_string(),
                 ));
@@ -438,7 +441,7 @@ fn relocate(
             outcome.push(
                 StatusTag::Info,
                 format!(
-                    "copied from Windows into the Aaru filesystem — {} file(s), {} folder(s)",
+                    "copied from Windows into the Astra filesystem — {} file(s), {} folder(s)",
                     summary.files, summary.dirs
                 ),
             );
@@ -463,10 +466,10 @@ fn relocate(
             Ok(outcome)
         }
 
-        // ---- cross-boundary: AARU → HOST ----
+        // ---- cross-boundary: ASTRA → HOST ----
         (
-            AaruLocation::Virtual(source),
-            AaruLocation::Host {
+            AstraLocation::Virtual(source),
+            AstraLocation::Host {
                 mount: to_mount,
                 relative: to_rel,
             },
@@ -476,7 +479,7 @@ fn relocate(
             outcome.push(
                 StatusTag::Info,
                 format!(
-                    "copied from the Aaru filesystem onto Windows — {} file(s), {} folder(s)",
+                    "copied from the Astra filesystem onto Windows — {} file(s), {} folder(s)",
                     summary.files, summary.dirs
                 ),
             );
@@ -487,7 +490,7 @@ fn relocate(
                     outcome.push(
                         StatusTag::Info,
                         format!(
-                            "source removed from the Aaru filesystem — {} resource(s)",
+                            "source removed from the Astra filesystem — {} resource(s)",
                             removed.total_resources
                         ),
                     );
@@ -501,7 +504,7 @@ fn relocate(
             Ok(outcome)
         }
 
-        _ => Err(AaruError::InvalidMove(
+        _ => Err(AstraError::InvalidMove(
             "transfer/copy needs a file or folder on each side — the bare HOST and ROOT roots are \
              not valid endpoints (pick a mount, e.g. HOST>Documents)"
                 .to_string(),
@@ -530,7 +533,7 @@ fn report_skips(outcome: &mut AlmanacOutcome, summary: &crate::state::CrossCopyS
     }
 }
 
-/// `[PROCESS] <action> <name> — Aaru PID N [SIM|HOST] (host PID M)`.
+/// `[PROCESS] <action> <name> — Astra PID N [SIM|HOST] (host PID M)`.
 fn pcb_line(action: &str, view: &PcbView) -> AlmanacOutcome {
     let label = if view.simulated { "SIM" } else { "HOST" };
     let host_pid = view
@@ -540,7 +543,7 @@ fn pcb_line(action: &str, view: &PcbView) -> AlmanacOutcome {
     AlmanacOutcome::line(
         StatusTag::Process,
         format!(
-            "{action} {} — Aaru PID {} [{label}]{host_pid}",
+            "{action} {} — Astra PID {} [{label}]{host_pid}",
             view.name, view.pid
         ),
     )
@@ -579,7 +582,7 @@ fn process_label(state: &SystemState, pid: crate::process::Pid) -> String {
 }
 
 /// Render `almanac scheduler` — the virtual CPU / scheduler status block.
-fn scheduler_status_lines(state: &SystemState) -> Result<AlmanacOutcome, AaruError> {
+fn scheduler_status_lines(state: &SystemState) -> Result<AlmanacOutcome, AstraError> {
     let snapshot = state.scheduler_snapshot()?;
     let mut outcome = AlmanacOutcome::default();
 
@@ -655,21 +658,21 @@ fn scheduler_status_lines(state: &SystemState) -> Result<AlmanacOutcome, AaruErr
     }
     outcome.push(
         StatusTag::Info,
-        "HOST_APP / HOST_COMMAND processes are observed only — Windows schedules them, not Aaru"
+        "HOST_APP / HOST_COMMAND processes are observed only — Windows schedules them, not Astra"
             .to_string(),
     );
     Ok(outcome)
 }
 
 /// Render `almanac memory` — the simulated RAM / swap / paging status block.
-fn memory_status_lines(state: &SystemState) -> Result<AlmanacOutcome, AaruError> {
+fn memory_status_lines(state: &SystemState) -> Result<AlmanacOutcome, AstraError> {
     let snapshot = state.memory_snapshot()?;
     let mut outcome = AlmanacOutcome::default();
 
     outcome.push(
         StatusTag::Ok,
         format!(
-            "AARU MEMORY — {} replacement · {} MB pages",
+            "ASTRA MEMORY — {} replacement · {} MB pages",
             snapshot.policy.label(),
             snapshot.page_size_mb,
         ),
@@ -708,7 +711,7 @@ fn memory_status_lines(state: &SystemState) -> Result<AlmanacOutcome, AaruError>
     );
     outcome.push(
         StatusTag::Info,
-        "simulated Aaru RAM is independent of Windows host memory".to_string(),
+        "simulated Astra RAM is independent of Windows host memory".to_string(),
     );
 
     if let Some(host) = snapshot.host {
@@ -732,14 +735,14 @@ fn append_editor_launch(
     app: &str,
     real_path: Option<&str>,
     display: &str,
-) -> Result<(), AaruError> {
+) -> Result<(), AstraError> {
     match real_path {
         Some(real) => {
             let view = state.open_host_file_in_app(app, real)?;
             outcome.lines.push(super::outcome::OutputLine::new(
                 StatusTag::Process,
                 format!(
-                    "opened {display} in {} — Aaru PID {} [HOST]{}",
+                    "opened {display} in {} — Astra PID {} [HOST]{}",
                     view.name,
                     view.pid,
                     view.host_pid
@@ -753,7 +756,7 @@ fn append_editor_launch(
                 outcome.lines.push(super::outcome::OutputLine::new(
                     StatusTag::Process,
                     format!(
-                        "opened {} — Aaru PID {} [HOST] (the virtual file {display} stays in Aaru)",
+                        "opened {} — Astra PID {} [HOST] (the virtual file {display} stays in Astra)",
                         process.name, process.pid
                     ),
                 ));
@@ -775,7 +778,7 @@ fn append_editor_launch(
             RunReport::Builtin { process, window } => {
                 outcome.lines.push(super::outcome::OutputLine::new(
                     StatusTag::Process,
-                    format!("started {} — Aaru PID {} [SIM]", process.name, process.pid),
+                    format!("started {} — Astra PID {} [SIM]", process.name, process.pid),
                 ));
                 outcome.open_window_title = window.as_ref().map(|_| process.name.clone());
                 outcome.open_window = window;
@@ -796,17 +799,17 @@ fn open_target(
     cwd: &str,
     path: &str,
     editor: EditorTarget,
-) -> Result<AlmanacOutcome, AaruError> {
+) -> Result<AlmanacOutcome, AstraError> {
     let app = match editor {
         EditorTarget::None => {
             // Original behaviour: navigate into the directory.
             return Ok(match state.route(cwd, path)? {
-                AaruLocation::Virtual(canonical) => {
+                AstraLocation::Virtual(canonical) => {
                     let info = state.open_directory("ROOT", &canonical)?;
                     moved(info.path)
                 }
-                AaruLocation::HostRoot => moved("HOST"),
-                AaruLocation::Host { mount, relative } => {
+                AstraLocation::HostRoot => moved("HOST"),
+                AstraLocation::Host { mount, relative } => {
                     let view = state.host_open(&mount, &relative)?;
                     moved(view.display_path)
                 }
@@ -816,12 +819,12 @@ fn open_target(
     };
 
     match state.route(cwd, path)? {
-        AaruLocation::HostRoot => Err(AaruError::InvalidPath(
+        AstraLocation::HostRoot => Err(AstraError::InvalidPath(
             "HOST is the mount list — open a folder or file inside a mount".to_string(),
         )),
-        AaruLocation::Virtual(canonical) => {
+        AstraLocation::Virtual(canonical) => {
             let info = state.inspect("ROOT", &canonical)?;
-            let display = format!("AARU>{}", info.path);
+            let display = format!("ASTRA>{}", info.path);
             let mut outcome = AlmanacOutcome::line(
                 StatusTag::Info,
                 if info.metadata.resource_type == ResourceType::Directory {
@@ -833,10 +836,10 @@ fn open_target(
             append_editor_launch(state, &mut outcome, cwd, &app, None, &display)?;
             Ok(outcome)
         }
-        AaruLocation::Host { mount, relative } => {
+        AstraLocation::Host { mount, relative } => {
             let view = state.host_inspect(&mount, &relative)?;
             let real = view.host_real_path.clone().ok_or_else(|| {
-                AaruError::Filesystem("could not resolve the real host path".to_string())
+                AstraError::Filesystem("could not resolve the real host path".to_string())
             })?;
             let mut outcome = AlmanacOutcome::line(
                 StatusTag::Info,
@@ -864,7 +867,7 @@ fn run_command_inner(
     state: &mut SystemState,
     cwd: &str,
     command: AlmanacCommand,
-) -> Result<AlmanacOutcome, AaruError> {
+) -> Result<AlmanacOutcome, AstraError> {
     Ok(match command {
         AlmanacCommand::Help => help_reference(),
 
@@ -877,23 +880,23 @@ fn run_command_inner(
         AlmanacCommand::Scan => scan_current(state, cwd)?,
 
         AlmanacCommand::Gen { path } => match state.route(cwd, &path)? {
-            AaruLocation::Virtual(canonical) => {
+            AstraLocation::Virtual(canonical) => {
                 let info = state.create_directory("ROOT", &canonical)?;
                 touched("created directory", &info.path)
             }
-            AaruLocation::HostRoot => {
-                return Err(AaruError::InvalidPath(
+            AstraLocation::HostRoot => {
+                return Err(AstraError::InvalidPath(
                     "HOST is the mount list — pick a mount, e.g. HOST>Documents>New".to_string(),
                 ))
             }
-            AaruLocation::Host { mount, relative } => {
+            AstraLocation::Host { mount, relative } => {
                 let view = state.host_create_dir(&mount, &relative)?;
                 touched("created host directory", &view.display_path)
             }
         },
         AlmanacCommand::Mgen { expression } => {
             if expression.trim_start().starts_with("HOST>") {
-                return Err(AaruError::InvalidArgument(
+                return Err(AstraError::InvalidArgument(
                     "mgen tree generation is virtual-only in this phase; use 'almanac gen' on HOST"
                         .to_string(),
                 ));
@@ -904,14 +907,16 @@ fn run_command_inner(
 
         AlmanacCommand::Write { path, editor } => {
             let (display, real) = match state.route(cwd, &path)? {
-                AaruLocation::Virtual(canonical) => {
+                AstraLocation::Virtual(canonical) => {
                     let info = state.create_file("ROOT", &canonical, "")?;
                     (info.path, None)
                 }
-                AaruLocation::HostRoot => {
-                    return Err(AaruError::InvalidPath("HOST is the mount list".to_string()))
+                AstraLocation::HostRoot => {
+                    return Err(AstraError::InvalidPath(
+                        "HOST is the mount list".to_string(),
+                    ))
                 }
-                AaruLocation::Host { mount, relative } => {
+                AstraLocation::Host { mount, relative } => {
                     let view = state.host_write(&mount, &relative, "", false)?;
                     (view.display_path, view.host_real_path)
                 }
@@ -924,20 +929,22 @@ fn run_command_inner(
         }
         AlmanacCommand::Rewrite { path, editor } => {
             let (display, real) = match state.route(cwd, &path)? {
-                AaruLocation::Virtual(canonical) => {
+                AstraLocation::Virtual(canonical) => {
                     let info = state.inspect("ROOT", &canonical)?;
                     if info.metadata.resource_type != ResourceType::File {
-                        return Err(AaruError::NotAFile(info.path));
+                        return Err(AstraError::NotAFile(info.path));
                     }
                     // Touch modified time / confirm writability.
                     let text = state.read_file("ROOT", &canonical)?;
                     state.write_file("ROOT", &canonical, &text)?;
                     (info.path, None)
                 }
-                AaruLocation::HostRoot => {
-                    return Err(AaruError::InvalidPath("HOST is the mount list".to_string()))
+                AstraLocation::HostRoot => {
+                    return Err(AstraError::InvalidPath(
+                        "HOST is the mount list".to_string(),
+                    ))
                 }
-                AaruLocation::Host { mount, relative } => {
+                AstraLocation::Host { mount, relative } => {
                     let text = state.host_read(&mount, &relative)?;
                     let view = state.host_write(&mount, &relative, &text, true)?;
                     (view.display_path, view.host_real_path)
@@ -959,7 +966,7 @@ fn run_command_inner(
         }
 
         AlmanacCommand::Destroy { path } => match state.route(cwd, &path)? {
-            AaruLocation::Virtual(canonical) => {
+            AstraLocation::Virtual(canonical) => {
                 let summary = state.delete_preview("ROOT", &canonical)?;
                 let id = state.next_prompt_id();
                 state.set_pending_prompt(PendingPrompt::DestroyConfirm {
@@ -982,12 +989,12 @@ fn run_command_inner(
                 });
                 outcome
             }
-            AaruLocation::HostRoot => {
-                return Err(AaruError::PermissionDenied(
+            AstraLocation::HostRoot => {
+                return Err(AstraError::PermissionDenied(
                     "cannot delete HOST — use 'almanac unmount <alias>'".to_string(),
                 ))
             }
-            AaruLocation::Host { mount, relative } => {
+            AstraLocation::Host { mount, relative } => {
                 let (files, folders) = state.host_delete_preview(&mount, &relative)?;
                 let display = format!("HOST>{mount}>{}", relative.join(">"));
                 let id = state.next_prompt_id();
@@ -999,7 +1006,7 @@ fn run_command_inner(
                 let mut outcome = AlmanacOutcome::default();
                 outcome.push(
                     StatusTag::Locked,
-                    "AARU::DESTROY [HOST RESOURCE]".to_string(),
+                    "ASTRA::DESTROY [HOST RESOURCE]".to_string(),
                 );
                 outcome.push(StatusTag::Info, format!("target: {display}"));
                 outcome.push(StatusTag::Info, format!("files: {files}"));
@@ -1019,16 +1026,16 @@ fn run_command_inner(
         },
 
         AlmanacCommand::Rename { path, new_name } => match state.route(cwd, &path)? {
-            AaruLocation::Virtual(canonical) => {
+            AstraLocation::Virtual(canonical) => {
                 let info = state.rename("ROOT", &canonical, &new_name)?;
                 touched("renamed to", &info.path)
             }
-            AaruLocation::HostRoot => {
-                return Err(AaruError::PermissionDenied(
+            AstraLocation::HostRoot => {
+                return Err(AstraError::PermissionDenied(
                     "cannot rename HOST".to_string(),
                 ))
             }
-            AaruLocation::Host { mount, relative } => {
+            AstraLocation::Host { mount, relative } => {
                 let view = state.host_rename(&mount, &relative, &new_name)?;
                 touched("renamed to", &view.display_path)
             }
@@ -1049,17 +1056,17 @@ fn run_command_inner(
             for skipped in &results.skipped {
                 outcome.push(
                     StatusTag::Locked,
-                    format!("skipped locked subtree AARU>{skipped}"),
+                    format!("skipped locked subtree ASTRA>{skipped}"),
                 );
             }
             outcome
         }
         AlmanacCommand::Inspect { path } => match state.route(cwd, &path)? {
-            AaruLocation::Virtual(canonical) => {
+            AstraLocation::Virtual(canonical) => {
                 let info = state.inspect("ROOT", &canonical)?;
                 let meta = &info.metadata;
                 let view = EntryView {
-                    display_path: format!("AARU>{}", info.path),
+                    display_path: format!("ASTRA>{}", info.path),
                     name: meta.name.clone(),
                     kind: ProviderKind::Virtual,
                     is_dir: meta.resource_type == ResourceType::Directory,
@@ -1067,7 +1074,7 @@ fn run_command_inner(
                     modified_ms: Some(meta.modified_at_ms),
                     created_ms: Some(meta.created_at_ms),
                     read_only: !meta.permissions.write,
-                    aaru_locked: meta.locked,
+                    astra_locked: meta.locked,
                     host_real_path: None,
                 };
                 let mut outcome = inspect_lines(&view);
@@ -1082,7 +1089,7 @@ fn run_command_inner(
                 );
                 outcome
             }
-            AaruLocation::HostRoot => {
+            AstraLocation::HostRoot => {
                 let mut outcome = AlmanacOutcome::line(StatusTag::Ok, "inspect HOST");
                 for mount in state.host_mount_list()? {
                     outcome.push(
@@ -1098,14 +1105,14 @@ fn run_command_inner(
                 }
                 outcome
             }
-            AaruLocation::Host { mount, relative } => {
+            AstraLocation::Host { mount, relative } => {
                 let view = state.host_inspect(&mount, &relative)?;
                 inspect_lines(&view)
             }
         },
 
         AlmanacCommand::Lock { path } => match state.route(cwd, &path)? {
-            AaruLocation::Virtual(canonical) => {
+            AstraLocation::Virtual(canonical) => {
                 let display = state.precheck_lock("ROOT", &canonical)?;
                 let id = state.next_prompt_id();
                 state.set_pending_prompt(PendingPrompt::LockPassword {
@@ -1118,10 +1125,10 @@ fn run_command_inner(
                     &format!("locking {display}"),
                 )
             }
-            AaruLocation::HostRoot => {
-                return Err(AaruError::PermissionDenied("cannot lock HOST".to_string()))
+            AstraLocation::HostRoot => {
+                return Err(AstraError::PermissionDenied("cannot lock HOST".to_string()))
             }
-            AaruLocation::Host { mount, relative } => {
+            AstraLocation::Host { mount, relative } => {
                 let (canonical_id, display) = state.host_precheck_lock(&mount, &relative)?;
                 let id = state.next_prompt_id();
                 state.set_pending_prompt(PendingPrompt::HostLockPassword {
@@ -1131,12 +1138,12 @@ fn run_command_inner(
                 let mut outcome = lock_prompt(
                     id,
                     "host_lock_password",
-                    "New Aaru lock password:",
+                    "New Astra lock password:",
                     &format!("locking {display}"),
                 );
                 outcome.push(
                     StatusTag::Info,
-                    "note: an Aaru lock only gates access inside Aaru-OS. It does not \
+                    "note: an Astra lock only gates access inside Astra OS. It does not \
                      encrypt the folder, change Windows permissions, or hide it from other \
                      programs."
                         .to_string(),
@@ -1145,7 +1152,7 @@ fn run_command_inner(
             }
         },
         AlmanacCommand::Unlock { path } => match state.route(cwd, &path)? {
-            AaruLocation::Virtual(canonical) => {
+            AstraLocation::Virtual(canonical) => {
                 let display = state.precheck_unlock("ROOT", &canonical)?;
                 let id = state.next_prompt_id();
                 state.set_pending_prompt(PendingPrompt::UnlockPassword {
@@ -1158,12 +1165,12 @@ fn run_command_inner(
                     &format!("unlocking {display}"),
                 )
             }
-            AaruLocation::HostRoot => {
-                return Err(AaruError::PermissionDenied(
+            AstraLocation::HostRoot => {
+                return Err(AstraError::PermissionDenied(
                     "cannot unlock HOST".to_string(),
                 ))
             }
-            AaruLocation::Host { mount, relative } => {
+            AstraLocation::Host { mount, relative } => {
                 let (canonical_id, display) = state.host_precheck_unlock(&mount, &relative)?;
                 let id = state.next_prompt_id();
                 state.set_pending_prompt(PendingPrompt::HostUnlockPassword {
@@ -1173,7 +1180,7 @@ fn run_command_inner(
                 lock_prompt(
                     id,
                     "host_unlock_password",
-                    "Aaru lock password:",
+                    "Astra lock password:",
                     &format!("unlocking {display}"),
                 )
             }
@@ -1220,10 +1227,10 @@ fn run_command_inner(
 
         AlmanacCommand::Reveal { path } => {
             match state.route(cwd, &path)? {
-                AaruLocation::Host { mount, relative } => {
+                AstraLocation::Host { mount, relative } => {
                     let view = state.host_inspect(&mount, &relative)?;
                     let real = view.host_real_path.clone().ok_or_else(|| {
-                        AaruError::Filesystem("could not resolve the real host path".to_string())
+                        AstraError::Filesystem("could not resolve the real host path".to_string())
                     })?;
                     let mut outcome = AlmanacOutcome::line(
                         StatusTag::Process,
@@ -1234,7 +1241,7 @@ fn run_command_inner(
                     );
                     outcome.push(
                         StatusTag::Info,
-                        "handed to Windows — not tracked as an Aaru process".to_string(),
+                        "handed to Windows — not tracked as an Astra process".to_string(),
                     );
                     outcome.launch = Some(AppLaunch {
                         app: "$default".to_string(),
@@ -1243,7 +1250,7 @@ fn run_command_inner(
                     });
                     outcome
                 }
-                _ => return Err(AaruError::InvalidPath(
+                _ => return Err(AstraError::InvalidPath(
                     "reveal applies only to HOST resources (virtual files have no Windows path)"
                         .to_string(),
                 )),
@@ -1353,8 +1360,8 @@ fn run_command_inner(
             let mut outcome = AlmanacOutcome::line(
                 StatusTag::System,
                 format!(
-                    "Kill LapSession will close Aaru only — {} Aaru process(es), {} tracked host process(es) active",
-                    summary.running_aaru, summary.running_host
+                    "Kill LapSession will close Astra only — {} Astra process(es), {} tracked host process(es) active",
+                    summary.running_astra, summary.running_host
                 ),
             );
             if !summary.host_names.is_empty() {
@@ -1370,7 +1377,7 @@ fn run_command_inner(
             outcome.prompt = Some(PromptRequest {
                 id,
                 kind: "kill_lapsession_confirm".to_string(),
-                message: "Close Aaru-OS and its managed processes? (Y/N)".to_string(),
+                message: "Close Astra OS and its managed processes? (Y/N)".to_string(),
                 masked: false,
             });
             outcome
@@ -1384,7 +1391,7 @@ fn run_command_inner(
             )?;
             let mut outcome = AlmanacOutcome::line(
                 StatusTag::System,
-                "Aaru runtime hibernated — simulated processes, scheduler and memory saved",
+                "Astra runtime hibernated — simulated processes, scheduler and memory saved",
             );
             outcome.system_action = Some(SystemAction::Hibernate);
             outcome
@@ -1394,7 +1401,7 @@ fn run_command_inner(
             state.prepare_restart()?;
             let mut outcome = AlmanacOutcome::line(
                 StatusTag::System,
-                "restarting Aaru-OS — running processes will not be restored",
+                "restarting Astra OS — running processes will not be restored",
             );
             outcome.system_action = Some(SystemAction::Restart);
             outcome
@@ -1403,9 +1410,9 @@ fn run_command_inner(
 }
 
 #[allow(clippy::field_reassign_with_default)] // outcome is built up field-by-field
-fn respond_inner(state: &mut SystemState, response: &str) -> Result<AlmanacOutcome, AaruError> {
+fn respond_inner(state: &mut SystemState, response: &str) -> Result<AlmanacOutcome, AstraError> {
     match state.take_pending_prompt() {
-        PendingPrompt::None => Err(AaruError::NoPendingPrompt),
+        PendingPrompt::None => Err(AstraError::NoPendingPrompt),
 
         PendingPrompt::DestroyConfirm { path, total } => {
             if is_affirmative(response) {
@@ -1460,10 +1467,10 @@ fn respond_inner(state: &mut SystemState, response: &str) -> Result<AlmanacOutco
                     StatusTag::Ok,
                     format!("unlocked {path}"),
                 )),
-                Err(error @ AaruError::AuthenticationFailed) => {
+                Err(error @ AstraError::AuthenticationFailed) => {
                     Ok(AlmanacOutcome::line(StatusTag::Denied, error.to_string()))
                 }
-                Err(error @ AaruError::AccountLocked { .. }) => {
+                Err(error @ AstraError::AccountLocked { .. }) => {
                     Ok(AlmanacOutcome::line(StatusTag::Auth, error.to_string()))
                 }
                 Err(error) => Err(error),
@@ -1489,14 +1496,14 @@ fn respond_inner(state: &mut SystemState, response: &str) -> Result<AlmanacOutco
                 state.prepare_shutdown()?;
                 let mut outcome = AlmanacOutcome::line(
                     StatusTag::System,
-                    "Aaru persistent state saved; managed processes released; closing LapSession",
+                    "Astra persistent state saved; managed processes released; closing LapSession",
                 );
                 outcome.system_action = Some(SystemAction::Shutdown);
                 Ok(outcome)
             } else {
                 Ok(AlmanacOutcome::line(
                     StatusTag::Info,
-                    "Kill LapSession cancelled — Aaru remains running",
+                    "Kill LapSession cancelled — Astra remains running",
                 ))
             }
         }
@@ -1537,7 +1544,7 @@ fn respond_inner(state: &mut SystemState, response: &str) -> Result<AlmanacOutco
             outcome.prompt = Some(PromptRequest {
                 id,
                 kind: "host_lock_confirm".to_string(),
-                message: "Confirm Aaru lock password:".to_string(),
+                message: "Confirm Astra lock password:".to_string(),
                 masked: true,
             });
             Ok(outcome)
@@ -1557,7 +1564,7 @@ fn respond_inner(state: &mut SystemState, response: &str) -> Result<AlmanacOutco
             Ok(AlmanacOutcome::line(
                 StatusTag::Ok,
                 format!(
-                    "{display} now carries an Aaru access lock (Aaru-OS only — Windows is unaffected)"
+                    "{display} now carries an Astra access lock (Astra OS only — Windows is unaffected)"
                 ),
             ))
         }
@@ -1567,12 +1574,12 @@ fn respond_inner(state: &mut SystemState, response: &str) -> Result<AlmanacOutco
         } => match state.host_commit_unlock(&canonical_id, response) {
             Ok(()) => Ok(AlmanacOutcome::line(
                 StatusTag::Ok,
-                format!("removed the Aaru lock on {display}"),
+                format!("removed the Astra lock on {display}"),
             )),
-            Err(error @ AaruError::AuthenticationFailed) => {
+            Err(error @ AstraError::AuthenticationFailed) => {
                 Ok(AlmanacOutcome::line(StatusTag::Denied, error.to_string()))
             }
-            Err(error @ AaruError::AccountLocked { .. }) => {
+            Err(error @ AstraError::AccountLocked { .. }) => {
                 Ok(AlmanacOutcome::line(StatusTag::Auth, error.to_string()))
             }
             Err(error) => Err(error),
@@ -1610,9 +1617,9 @@ fn help_reference() -> AlmanacOutcome {
         ("rename <path>>newName", "rename a resource"),
         (
             "transfer <from> <to>",
-            "move a resource (HOST↔AARU allowed)",
+            "move a resource (HOST↔ASTRA allowed)",
         ),
-        ("copy <from> <to>", "copy a resource (HOST↔AARU allowed)"),
+        ("copy <from> <to>", "copy a resource (HOST↔ASTRA allowed)"),
         ("lookout <term>", "search accessible resources"),
         ("inspect <path>", "show resource metadata"),
         ("lock <path>", "password-lock a directory"),
@@ -1629,8 +1636,8 @@ fn help_reference() -> AlmanacOutcome {
             "reveal HOST><path>",
             "open a host file in its default Windows app",
         ),
-        ("process", "list the Aaru process table"),
-        ("terminate|suspend|resume <pid>", "manage an Aaru process"),
+        ("process", "list the Astra process table"),
+        ("terminate|suspend|resume <pid>", "manage an Astra process"),
         (
             "scheduler [change <algo>] [tick <n>]",
             "inspect or drive the virtual CPU scheduler",
@@ -1640,9 +1647,9 @@ fn help_reference() -> AlmanacOutcome {
             "inspect the simulated RAM / swap / paging model",
         ),
         ("logout", "end the session"),
-        ("kill lapsession", "shut Aaru-OS down"),
-        ("hibernate", "hibernate Aaru-OS"),
-        ("restart", "restart Aaru-OS"),
+        ("kill lapsession", "shut Astra OS down"),
+        ("hibernate", "hibernate Astra OS"),
+        ("restart", "restart Astra OS"),
     ] {
         outcome.push(StatusTag::Info, format!("  almanac {verb} — {blurb}"));
     }
@@ -1934,12 +1941,12 @@ mod tests {
     }
 
     #[test]
-    fn cross_boundary_copy_host_to_aaru_then_transfer_aaru_to_host() {
+    fn cross_boundary_copy_host_to_astra_then_transfer_astra_to_host() {
         let dir = tempfile::tempdir().unwrap();
         let work = tempfile::tempdir().unwrap();
         let mut state = host_state(&dir, work.path());
 
-        // HOST → AARU copy: the host file lands in the virtual tree, original stays.
+        // HOST → ASTRA copy: the host file lands in the virtual tree, original stays.
         assert_eq!(
             evaluate(
                 &mut state,
@@ -1955,7 +1962,7 @@ mod tests {
         );
         assert!(work.path().join("notes.txt").is_file());
 
-        // HOST → AARU copy of a whole folder.
+        // HOST → ASTRA copy of a whole folder.
         assert_eq!(
             evaluate(
                 &mut state,
@@ -1972,13 +1979,13 @@ mod tests {
             "pdf"
         );
 
-        // AARU → HOST transfer: the virtual file is written to the mount and
-        // then removed from the Aaru filesystem.
+        // ASTRA → HOST transfer: the virtual file is written to the mount and
+        // then removed from the Astra filesystem.
         assert_eq!(
             evaluate(
                 &mut state,
                 "ROOT",
-                "almanac transfer AARU>Documents>notes.txt HOST>Dev>University"
+                "almanac transfer ASTRA>Documents>notes.txt HOST>Dev>University"
             )
             .first_tag(),
             Some(StatusTag::Ok)
@@ -2018,12 +2025,12 @@ mod tests {
             .read_file("ROOT", "ROOT>Downloads>logo bits.bin")
             .is_err());
 
-        // AARU → HOST: bytes come back out identical.
+        // ASTRA → HOST: bytes come back out identical.
         assert_eq!(
             evaluate(
                 &mut state,
                 "ROOT",
-                "almanac copy \"AARU>Downloads>logo bits.bin\" HOST>Dev>University",
+                "almanac copy \"ASTRA>Downloads>logo bits.bin\" HOST>Dev>University",
             )
             .first_tag(),
             Some(StatusTag::Ok)
@@ -2151,7 +2158,7 @@ mod tests {
 
         let blocked = evaluate(&mut state, "ROOT", "almanac open HOST>Dev>Secret");
         assert_eq!(blocked.first_tag(), Some(StatusTag::Locked));
-        // The lock is an Aaru gate only — the real folder is untouched.
+        // The lock is an Astra gate only — the real folder is untouched.
         assert!(work.path().join("Secret").join("plan.txt").is_file());
 
         evaluate(&mut state, "ROOT", "almanac unlock HOST>Dev>Secret");
@@ -2191,14 +2198,14 @@ mod tests {
         let listed = evaluate(&mut state, "ROOT", "almanac process");
         let text = listed.rendered().join("\n");
         assert!(text.contains("Calculator"));
-        assert!(text.contains("AaruApp"));
+        assert!(text.contains("AstraApp"));
         assert!(text.contains("[SIM"));
         // parent-child linkage: the built-in is a child of the Almanac launcher (PID 2)
         assert!(text.contains("ppid   2"));
     }
 
     #[test]
-    fn run_game_registers_an_aaru_game_process_with_workload() {
+    fn run_game_registers_an_astra_game_process_with_workload() {
         let dir = tempfile::tempdir().unwrap();
         let mut state = logged_in_state(&dir);
         let outcome = evaluate(&mut state, "ROOT", "almanac run Tetris");
@@ -2207,7 +2214,7 @@ mod tests {
         assert!(evaluate(&mut state, "ROOT", "almanac process")
             .rendered()
             .join("\n")
-            .contains("AaruGame"));
+            .contains("AstraGame"));
     }
 
     #[test]
@@ -2357,7 +2364,7 @@ mod tests {
             .join("\n");
         let running = processes
             .lines()
-            .filter(|line| line.contains("AaruApp") || line.contains("AaruGame"))
+            .filter(|line| line.contains("AstraApp") || line.contains("AstraGame"))
             .filter(|line| line.contains("Running"))
             .count();
         assert_eq!(running, 2, "only two virtual cores can run at once");
@@ -2381,14 +2388,14 @@ mod tests {
     // -------------------- Phase 7: simulated memory --------------------
 
     #[test]
-    fn memory_status_reports_the_aaru_ram_swap_and_paging_model() {
+    fn memory_status_reports_the_astra_ram_swap_and_paging_model() {
         let dir = tempfile::tempdir().unwrap();
         let mut state = logged_in_state(&dir);
 
         let status = evaluate(&mut state, "ROOT", "almanac memory");
         assert_eq!(status.first_tag(), Some(StatusTag::Ok));
         let text = status.rendered().join("\n");
-        assert!(text.contains("AARU MEMORY"));
+        assert!(text.contains("ASTRA MEMORY"));
         assert!(text.contains("FIFO replacement"));
         assert!(text.contains("RAM: 0 / 4096 MB used"));
         assert!(text.contains("Frames: 0 / 1024 used"));
@@ -2490,7 +2497,7 @@ mod tests {
     }
 
     #[test]
-    fn kill_lapsession_warns_confirms_and_clears_only_aaru_runtime() {
+    fn kill_lapsession_warns_confirms_and_clears_only_astra_runtime() {
         let dir = tempfile::tempdir().unwrap();
         let mut state = logged_in_state(&dir);
         evaluate(&mut state, "ROOT", "almanac run Calculator");

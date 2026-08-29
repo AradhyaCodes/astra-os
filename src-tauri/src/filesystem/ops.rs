@@ -4,9 +4,9 @@
 //! functions keep the existing shell commands working while Almanac's full
 //! command grammar is developed in a later phase.
 
-use crate::{error::AaruError, filesystem::model::VirtualFileSystem};
+use crate::{error::AstraError, filesystem::model::VirtualFileSystem};
 
-type Result<T> = std::result::Result<T, AaruError>;
+type Result<T> = std::result::Result<T, AstraError>;
 
 pub fn mkdir(vfs: &mut VirtualFileSystem, cwd: &str, path: &str) -> Result<()> {
     vfs.create_directory(cwd, path).map(|_| ())
@@ -48,17 +48,17 @@ mod tests {
     #[test]
     fn phase_zero_commands_use_the_phase_one_engine() {
         let mut vfs = VirtualFileSystem::new();
-        mkdir(&mut vfs, "ROOT", "Projects>AaruOS").expect("mkdir");
-        touch(&mut vfs, "ROOT", "Projects>AaruOS>notes.txt").expect("touch");
-        write(&mut vfs, "ROOT", "Projects>AaruOS>notes.txt", "hello").expect("write");
+        mkdir(&mut vfs, "ROOT", "Projects>AstraOS").expect("mkdir");
+        touch(&mut vfs, "ROOT", "Projects>AstraOS>notes.txt").expect("touch");
+        write(&mut vfs, "ROOT", "Projects>AstraOS>notes.txt", "hello").expect("write");
 
         assert_eq!(
-            cat(&vfs, "ROOT", "Projects>AaruOS>notes.txt").unwrap(),
+            cat(&vfs, "ROOT", "Projects>AstraOS>notes.txt").unwrap(),
             "hello"
         );
         assert_eq!(
-            cd(&vfs, "ROOT", "Projects>AaruOS").unwrap(),
-            "ROOT>Projects>AaruOS"
+            cd(&vfs, "ROOT", "Projects>AstraOS").unwrap(),
+            "ROOT>Projects>AstraOS"
         );
     }
 }

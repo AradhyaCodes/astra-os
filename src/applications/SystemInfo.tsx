@@ -185,9 +185,9 @@ export function SystemInfo() {
       {/* Header */}
       <header className="dev-header">
         <div className="dev-header-left">
-          <div className="os-badge" aria-label="Aaru OS">
+          <div className="os-badge" aria-label="Astra OS">
             <span className="os-mark" aria-hidden="true" />
-            AARU-OS
+            ASTRA-OS
           </div>
           <div>
             <h1 className="dev-title">System Configuration</h1>

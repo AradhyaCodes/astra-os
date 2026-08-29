@@ -9,11 +9,11 @@
 //!    (defeating `..`, prefix confusion and symlink/junction escape for the
 //!    parts that already exist).
 //!
-//! Aaru's *virtual* naming rules (extension-or-dotfile names, depth cap, …)
+//! Astra's *virtual* naming rules (extension-or-dotfile names, depth cap, …)
 //! are **not** applied to pre-existing host resources. New host resources are
 //! validated against Windows naming rules only.
 
-use crate::error::AaruError;
+use crate::error::AstraError;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -37,7 +37,7 @@ pub struct HostDirs {
     pub home: Option<PathBuf>,
     /// `%PUBLIC%\Desktop` — the all-users Desktop where system-wide app
     /// shortcuts live. Windows Explorer shows this merged with the user's own
-    /// Desktop; the Aaru bridge keeps it a separate, explicit mount.
+    /// Desktop; the Astra bridge keeps it a separate, explicit mount.
     pub public_desktop: Option<PathBuf>,
 }
 
@@ -171,11 +171,11 @@ impl HostFilesystem {
         &mut self,
         source: &Path,
         requested_alias: Option<&str>,
-    ) -> Result<String, AaruError> {
+    ) -> Result<String, AstraError> {
         let canonical = dunce::canonicalize(source)
-            .map_err(|error| AaruError::PathNotFound(format!("{}: {error}", source.display())))?;
+            .map_err(|error| AstraError::PathNotFound(format!("{}: {error}", source.display())))?;
         if !canonical.is_dir() {
-            return Err(AaruError::NotADirectory(canonical.display().to_string()));
+            return Err(AstraError::NotADirectory(canonical.display().to_string()));
         }
 
         let base = requested_alias
@@ -207,9 +207,9 @@ impl HostFilesystem {
         Ok(alias)
     }
 
-    pub fn unmount(&mut self, alias: &str) -> Result<(), AaruError> {
+    pub fn unmount(&mut self, alias: &str) -> Result<(), AstraError> {
         if self.mounts.remove(alias).is_none() {
-            return Err(AaruError::PathNotFound(format!(
+            return Err(AstraError::PathNotFound(format!(
                 "no host mount named '{alias}'"
             )));
         }
@@ -276,9 +276,9 @@ impl HostFilesystem {
     // Path resolution + traversal guard
     // ------------------------------------------------------------------
 
-    fn mount_of(&self, alias: &str) -> Result<&HostMount, AaruError> {
+    fn mount_of(&self, alias: &str) -> Result<&HostMount, AstraError> {
         self.mounts.get(alias).ok_or_else(|| {
-            AaruError::PathNotFound(format!(
+            AstraError::PathNotFound(format!(
                 "no host mount named '{alias}' (try 'almanac mount')"
             ))
         })
@@ -286,7 +286,7 @@ impl HostFilesystem {
 
     /// Join `relative` onto the mount root and verify the real, canonical path
     /// does not escape it. Returns the (possibly not-yet-existing) target path.
-    pub fn resolve(&self, alias: &str, relative: &[String]) -> Result<PathBuf, AaruError> {
+    pub fn resolve(&self, alias: &str, relative: &[String]) -> Result<PathBuf, AstraError> {
         let mount = self.mount_of(alias)?;
         let mut target = mount.root.clone();
         for segment in relative {
@@ -295,7 +295,7 @@ impl HostFilesystem {
                 || segment == ".."
                 || segment.contains(['/', '\\', ':'])
             {
-                return Err(AaruError::InvalidPath(format!(
+                return Err(AstraError::InvalidPath(format!(
                     "illegal host path segment '{segment}'"
                 )));
             }
@@ -305,13 +305,13 @@ impl HostFilesystem {
         // Canonicalise the longest existing prefix and confirm containment.
         let anchor = longest_existing_ancestor(&target);
         let canonical_anchor = dunce::canonicalize(&anchor).map_err(|error| {
-            AaruError::Filesystem(format!(
+            AstraError::Filesystem(format!(
                 "could not canonicalise {}: {error}",
                 anchor.display()
             ))
         })?;
         if !canonical_anchor.starts_with(&mount.root) {
-            return Err(AaruError::PermissionDenied(format!(
+            return Err(AstraError::PermissionDenied(format!(
                 "path escapes the approved mount root {HOST_LABEL}>{alias}"
             )));
         }
@@ -320,7 +320,7 @@ impl HostFilesystem {
             .components()
             .any(|component| matches!(component, Component::ParentDir))
         {
-            return Err(AaruError::PermissionDenied(
+            return Err(AstraError::PermissionDenied(
                 "'..' is not allowed in host paths".to_string(),
             ));
         }
@@ -328,14 +328,14 @@ impl HostFilesystem {
     }
 
     /// Stable canonical identifier for lock metadata.
-    pub fn canonical_id(&self, alias: &str, relative: &[String]) -> Result<String, AaruError> {
+    pub fn canonical_id(&self, alias: &str, relative: &[String]) -> Result<String, AstraError> {
         let target = self.resolve(alias, relative)?;
         let canonical = match dunce::canonicalize(&target) {
             Ok(path) => path,
             Err(_) => {
                 let parent = target.parent().unwrap_or(&target);
                 let parent = dunce::canonicalize(parent).map_err(|error| {
-                    AaruError::Filesystem(format!("could not canonicalise parent: {error}"))
+                    AstraError::Filesystem(format!("could not canonicalise parent: {error}"))
                 })?;
                 match target.file_name() {
                     Some(name) => parent.join(name),
@@ -347,8 +347,12 @@ impl HostFilesystem {
     }
 
     /// Canonical id for every mount-relative ancestor of a host path, closest
-    /// last. Used to find applicable Aaru locks.
-    pub fn ancestor_ids(&self, alias: &str, relative: &[String]) -> Result<Vec<String>, AaruError> {
+    /// last. Used to find applicable Astra locks.
+    pub fn ancestor_ids(
+        &self,
+        alias: &str,
+        relative: &[String],
+    ) -> Result<Vec<String>, AstraError> {
         let mut ids = Vec::new();
         for depth in 0..=relative.len() {
             ids.push(self.canonical_id(alias, &relative[..depth])?);
@@ -360,27 +364,27 @@ impl HostFilesystem {
     // Operations
     // ------------------------------------------------------------------
 
-    pub fn entry(&self, alias: &str, relative: &[String]) -> Result<HostEntry, AaruError> {
+    pub fn entry(&self, alias: &str, relative: &[String]) -> Result<HostEntry, AstraError> {
         let path = self.resolve(alias, relative)?;
         let metadata = fs::symlink_metadata(&path)
-            .map_err(|error| AaruError::PathNotFound(format!("{}: {error}", path.display())))?;
+            .map_err(|error| AstraError::PathNotFound(format!("{}: {error}", path.display())))?;
         Ok(describe(&path, &metadata))
     }
 
-    pub fn real_path(&self, alias: &str, relative: &[String]) -> Result<PathBuf, AaruError> {
+    pub fn real_path(&self, alias: &str, relative: &[String]) -> Result<PathBuf, AstraError> {
         self.resolve(alias, relative)
     }
 
-    pub fn list_dir(&self, alias: &str, relative: &[String]) -> Result<Vec<HostEntry>, AaruError> {
+    pub fn list_dir(&self, alias: &str, relative: &[String]) -> Result<Vec<HostEntry>, AstraError> {
         let path = self.resolve(alias, relative)?;
         if !path.is_dir() {
-            return Err(AaruError::NotADirectory(display(alias, relative)));
+            return Err(AstraError::NotADirectory(display(alias, relative)));
         }
         let mut entries = Vec::new();
         for item in fs::read_dir(&path)
-            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", path.display())))?
+            .map_err(|error| AstraError::Filesystem(format!("{}: {error}", path.display())))?
         {
-            let item = item.map_err(|error| AaruError::Filesystem(error.to_string()))?;
+            let item = item.map_err(|error| AstraError::Filesystem(error.to_string()))?;
             if let Ok(metadata) = item.metadata() {
                 entries.push(describe(&item.path(), &metadata));
             }
@@ -389,15 +393,15 @@ impl HostFilesystem {
         Ok(entries)
     }
 
-    pub fn read_text(&self, alias: &str, relative: &[String]) -> Result<String, AaruError> {
+    pub fn read_text(&self, alias: &str, relative: &[String]) -> Result<String, AstraError> {
         let path = self.resolve(alias, relative)?;
         if !path.is_file() {
-            return Err(AaruError::NotAFile(display(alias, relative)));
+            return Err(AstraError::NotAFile(display(alias, relative)));
         }
         let bytes = fs::read(&path)
-            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", path.display())))?;
+            .map_err(|error| AstraError::Filesystem(format!("{}: {error}", path.display())))?;
         String::from_utf8(bytes).map_err(|_| {
-            AaruError::InvalidArgument(format!(
+            AstraError::InvalidArgument(format!(
                 "{} is not UTF-8 text and cannot be shown here",
                 display(alias, relative)
             ))
@@ -405,13 +409,13 @@ impl HostFilesystem {
     }
 
     /// Read a host file as raw bytes, no UTF-8 requirement.
-    pub fn read_bytes(&self, alias: &str, relative: &[String]) -> Result<Vec<u8>, AaruError> {
+    pub fn read_bytes(&self, alias: &str, relative: &[String]) -> Result<Vec<u8>, AstraError> {
         let path = self.resolve(alias, relative)?;
         if !path.is_file() {
-            return Err(AaruError::NotAFile(display(alias, relative)));
+            return Err(AstraError::NotAFile(display(alias, relative)));
         }
         fs::read(&path)
-            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", path.display())))
+            .map_err(|error| AstraError::Filesystem(format!("{}: {error}", path.display())))
     }
 
     pub fn write_text(
@@ -420,7 +424,7 @@ impl HostFilesystem {
         relative: &[String],
         contents: &str,
         must_exist: bool,
-    ) -> Result<HostEntry, AaruError> {
+    ) -> Result<HostEntry, AstraError> {
         self.write_raw(alias, relative, contents.as_bytes(), must_exist)
     }
 
@@ -431,7 +435,7 @@ impl HostFilesystem {
         relative: &[String],
         data: &[u8],
         must_exist: bool,
-    ) -> Result<HostEntry, AaruError> {
+    ) -> Result<HostEntry, AstraError> {
         self.write_raw(alias, relative, data, must_exist)
     }
 
@@ -441,44 +445,44 @@ impl HostFilesystem {
         relative: &[String],
         data: &[u8],
         must_exist: bool,
-    ) -> Result<HostEntry, AaruError> {
+    ) -> Result<HostEntry, AstraError> {
         let (_, leaf) = split_leaf(relative)?;
         validate_windows_name(leaf)?;
         let path = self.resolve(alias, relative)?;
         if must_exist && !path.is_file() {
-            return Err(AaruError::PathNotFound(format!(
+            return Err(AstraError::PathNotFound(format!(
                 "{} — rewrite requires an existing host file",
                 display(alias, relative)
             )));
         }
         if path.is_dir() {
-            return Err(AaruError::NotAFile(display(alias, relative)));
+            return Err(AstraError::NotAFile(display(alias, relative)));
         }
         if let Some(parent) = path.parent() {
             if !parent.is_dir() {
-                return Err(AaruError::PathNotFound(format!(
+                return Err(AstraError::PathNotFound(format!(
                     "parent directory of {} does not exist",
                     display(alias, relative)
                 )));
             }
         }
         fs::write(&path, data)
-            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", path.display())))?;
+            .map_err(|error| AstraError::Filesystem(format!("{}: {error}", path.display())))?;
         self.entry(alias, relative)
     }
 
-    pub fn create_dir(&self, alias: &str, relative: &[String]) -> Result<HostEntry, AaruError> {
+    pub fn create_dir(&self, alias: &str, relative: &[String]) -> Result<HostEntry, AstraError> {
         let (_, leaf) = split_leaf(relative)?;
         validate_windows_name(leaf)?;
         let path = self.resolve(alias, relative)?;
         if path.exists() {
-            return Err(AaruError::DuplicateName {
+            return Err(AstraError::DuplicateName {
                 name: leaf.to_string(),
                 dir: display(alias, &relative[..relative.len().saturating_sub(1)]),
             });
         }
         fs::create_dir(&path)
-            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", path.display())))?;
+            .map_err(|error| AstraError::Filesystem(format!("{}: {error}", path.display())))?;
         self.entry(alias, relative)
     }
 
@@ -487,24 +491,24 @@ impl HostFilesystem {
         alias: &str,
         relative: &[String],
         new_name: &str,
-    ) -> Result<HostEntry, AaruError> {
+    ) -> Result<HostEntry, AstraError> {
         validate_windows_name(new_name)?;
         let source = self.resolve(alias, relative)?;
         if !source.exists() {
-            return Err(AaruError::PathNotFound(display(alias, relative)));
+            return Err(AstraError::PathNotFound(display(alias, relative)));
         }
         let parent_rel = &relative[..relative.len().saturating_sub(1)];
         let mut target_rel = parent_rel.to_vec();
         target_rel.push(new_name.to_string());
         let target = self.resolve(alias, &target_rel)?;
         if target.exists() {
-            return Err(AaruError::DuplicateName {
+            return Err(AstraError::DuplicateName {
                 name: new_name.to_string(),
                 dir: display(alias, parent_rel),
             });
         }
         fs::rename(&source, &target)
-            .map_err(|error| AaruError::Filesystem(format!("rename failed: {error}")))?;
+            .map_err(|error| AstraError::Filesystem(format!("rename failed: {error}")))?;
         self.entry(alias, &target_rel)
     }
 
@@ -517,29 +521,29 @@ impl HostFilesystem {
         to_alias: &str,
         to_relative: &[String],
         copy: bool,
-    ) -> Result<HostEntry, AaruError> {
+    ) -> Result<HostEntry, AstraError> {
         let source = self.resolve(from_alias, from_relative)?;
         if !source.exists() {
-            return Err(AaruError::PathNotFound(display(from_alias, from_relative)));
+            return Err(AstraError::PathNotFound(display(from_alias, from_relative)));
         }
         let destination_dir = self.resolve(to_alias, to_relative)?;
         if !destination_dir.is_dir() {
-            return Err(AaruError::NotADirectory(display(to_alias, to_relative)));
+            return Err(AstraError::NotADirectory(display(to_alias, to_relative)));
         }
         let name = source
             .file_name()
-            .ok_or_else(|| AaruError::InvalidPath("source has no file name".to_string()))?
+            .ok_or_else(|| AstraError::InvalidPath("source has no file name".to_string()))?
             .to_os_string();
         let target = destination_dir.join(&name);
         if target.exists() {
-            return Err(AaruError::DuplicateName {
+            return Err(AstraError::DuplicateName {
                 name: name.to_string_lossy().to_string(),
                 dir: display(to_alias, to_relative),
             });
         }
         // Prevent moving a directory into itself / its own subtree.
         if source.is_dir() && target.starts_with(&source) {
-            return Err(AaruError::InvalidMove(
+            return Err(AstraError::InvalidMove(
                 "cannot move a directory into itself".to_string(),
             ));
         }
@@ -550,7 +554,7 @@ impl HostFilesystem {
             // Cross-volume rename fails; fall back to copy + recycle of source.
             copy_recursive(&source, &target)?;
             trash::delete(&source).map_err(|error| {
-                AaruError::Filesystem(format!(
+                AstraError::Filesystem(format!(
                     "moved by copy, but could not recycle the original: {error}"
                 ))
             })?;
@@ -565,10 +569,10 @@ impl HostFilesystem {
         &self,
         alias: &str,
         relative: &[String],
-    ) -> Result<(u64, u64), AaruError> {
+    ) -> Result<(u64, u64), AstraError> {
         let path = self.resolve(alias, relative)?;
         if !path.exists() {
-            return Err(AaruError::PathNotFound(display(alias, relative)));
+            return Err(AstraError::PathNotFound(display(alias, relative)));
         }
         let mut files = 0;
         let mut folders = 0;
@@ -582,19 +586,19 @@ impl HostFilesystem {
         &self,
         alias: &str,
         relative: &[String],
-    ) -> Result<HostDeleteOutcome, AaruError> {
+    ) -> Result<HostDeleteOutcome, AstraError> {
         let path = self.resolve(alias, relative)?;
         if !path.exists() {
-            return Err(AaruError::PathNotFound(display(alias, relative)));
+            return Err(AstraError::PathNotFound(display(alias, relative)));
         }
         if relative.is_empty() {
-            return Err(AaruError::PermissionDenied(
+            return Err(AstraError::PermissionDenied(
                 "a mount root itself cannot be deleted — unmount it instead".to_string(),
             ));
         }
         let (files, folders) = self.count_descendants(alias, relative)?;
         trash::delete(&path).map_err(|error| {
-            AaruError::Filesystem(format!(
+            AstraError::Filesystem(format!(
                 "could not move {} to the Recycle Bin: {error} — nothing was deleted",
                 display(alias, relative)
             ))
@@ -633,10 +637,10 @@ fn display(alias: &str, relative: &[String]) -> String {
     }
 }
 
-fn split_leaf(relative: &[String]) -> Result<(&[String], &str), AaruError> {
+fn split_leaf(relative: &[String]) -> Result<(&[String], &str), AstraError> {
     match relative.split_last() {
         Some((leaf, parent)) => Ok((parent, leaf.as_str())),
-        None => Err(AaruError::InvalidPath(
+        None => Err(AstraError::InvalidPath(
             "a host operation needs a target inside the mount, not the mount root".to_string(),
         )),
     }
@@ -691,21 +695,21 @@ fn count_into(path: &Path, files: &mut u64, folders: &mut u64) {
     }
 }
 
-fn copy_recursive(source: &Path, target: &Path) -> Result<(), AaruError> {
+fn copy_recursive(source: &Path, target: &Path) -> Result<(), AstraError> {
     let metadata = fs::symlink_metadata(source)
-        .map_err(|error| AaruError::Filesystem(format!("{}: {error}", source.display())))?;
+        .map_err(|error| AstraError::Filesystem(format!("{}: {error}", source.display())))?;
     if metadata.is_dir() {
         fs::create_dir(target)
-            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", target.display())))?;
+            .map_err(|error| AstraError::Filesystem(format!("{}: {error}", target.display())))?;
         for entry in fs::read_dir(source)
-            .map_err(|error| AaruError::Filesystem(error.to_string()))?
+            .map_err(|error| AstraError::Filesystem(error.to_string()))?
             .flatten()
         {
             copy_recursive(&entry.path(), &target.join(entry.file_name()))?;
         }
     } else {
         fs::copy(source, target)
-            .map_err(|error| AaruError::Filesystem(format!("copy failed: {error}")))?;
+            .map_err(|error| AstraError::Filesystem(format!("copy failed: {error}")))?;
     }
     Ok(())
 }
@@ -758,10 +762,10 @@ fn sanitize_alias(raw: &str) -> String {
     cleaned.trim_matches(['_', '.', '-']).to_string()
 }
 
-/// Windows filename rules — deliberately *not* Aaru's virtual rules.
-pub fn validate_windows_name(name: &str) -> Result<(), AaruError> {
+/// Windows filename rules — deliberately *not* Astra's virtual rules.
+pub fn validate_windows_name(name: &str) -> Result<(), AstraError> {
     if name.is_empty() {
-        return Err(AaruError::InvalidName {
+        return Err(AstraError::InvalidName {
             name: name.to_string(),
             reason: "name cannot be empty".to_string(),
         });
@@ -770,14 +774,14 @@ pub fn validate_windows_name(name: &str) -> Result<(), AaruError> {
         .chars()
         .any(|c| "<>:\"/\\|?*".contains(c) || (c as u32) < 0x20)
     {
-        return Err(AaruError::InvalidName {
+        return Err(AstraError::InvalidName {
             name: name.to_string(),
             reason: r#"Windows names cannot contain < > : " / \ | ? * or control characters"#
                 .to_string(),
         });
     }
     if name.ends_with('.') || name.ends_with(' ') {
-        return Err(AaruError::InvalidName {
+        return Err(AstraError::InvalidName {
             name: name.to_string(),
             reason: "Windows names cannot end with a space or a dot".to_string(),
         });
@@ -788,7 +792,7 @@ pub fn validate_windows_name(name: &str) -> Result<(), AaruError> {
         "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     if RESERVED.contains(&stem.as_str()) {
-        return Err(AaruError::InvalidName {
+        return Err(AstraError::InvalidName {
             name: name.to_string(),
             reason: format!("'{stem}' is a reserved Windows device name"),
         });
@@ -858,11 +862,11 @@ mod tests {
         let (_dir, host, alias) = temp_mount();
         assert!(matches!(
             host.resolve(&alias, &["..".to_string(), "Windows".to_string()]),
-            Err(AaruError::InvalidPath(_))
+            Err(AstraError::InvalidPath(_))
         ));
         assert!(matches!(
             host.resolve(&alias, &["sub\\..\\..".to_string()]),
-            Err(AaruError::InvalidPath(_))
+            Err(AstraError::InvalidPath(_))
         ));
     }
 

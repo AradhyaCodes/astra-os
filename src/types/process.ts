@@ -5,7 +5,7 @@
 import type { SchedulerAlgorithm } from "./system";
 
 export type ProcessType =
-  "SYSTEM" | "AARU_APP" | "AARU_GAME" | "HOST_APP" | "HOST_COMMAND";
+  "SYSTEM" | "ASTRA_APP" | "ASTRA_GAME" | "HOST_APP" | "HOST_COMMAND";
 
 export type ProcessState =
   "NEW" | "READY" | "RUNNING" | "WAITING" | "SUSPENDED" | "TERMINATED";
@@ -26,7 +26,7 @@ export interface PcbView {
   host_backed: boolean;
   host_pid: number | null;
   protected: boolean;
-  /** true → metrics + scheduler state are Aaru simulations (SIMULATED label). */
+  /** true → metrics + scheduler state are Astra simulations (SIMULATED label). */
   simulated: boolean;
   workload: string;
   note: string | null;

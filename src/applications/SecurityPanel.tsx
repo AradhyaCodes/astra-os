@@ -136,7 +136,7 @@ export function SecurityPanel() {
         <h3 id="security-target-title">Target resource</h3>
         <div className="security-path-row">
           <label>
-            <span>Aaru path</span>
+            <span>Astra path</span>
             <input
               value={path}
               onChange={(event) => {

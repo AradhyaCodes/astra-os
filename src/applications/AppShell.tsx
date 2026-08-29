@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type { PcbView } from "../types";
 
 /**
- * Generic placeholder window for built-in Aaru apps and games that are
+ * Generic placeholder window for built-in Astra apps and games that are
  * registered as processes but do not yet have a bespoke UI (Settings,
  * Calculator, TextEditor, ImageViewer, Snake, Pong, Minesweeper, Tetris).
  *
@@ -35,11 +35,11 @@ export function AppShell({ title }: { title: string }) {
     <div className="app-shell">
       <h2>{title}</h2>
       <p className="app-shell-sub">
-        Built-in Aaru application — a full UI arrives in a later phase.
+        Built-in Astra application — a full UI arrives in a later phase.
       </p>
       {process ? (
         <dl className="app-shell-grid">
-          <dt>Aaru PID</dt>
+          <dt>Astra PID</dt>
           <dd>{process.pid}</dd>
           <dt>Type</dt>
           <dd>{process.process_type}</dd>

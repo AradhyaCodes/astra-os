@@ -1,4 +1,4 @@
-//! Aaru-OS — Almanac command engine.
+//! Astra OS — Almanac command engine.
 //!
 //! Layers:
 //! - [`lexer`] — whitespace/quote tokeniser that keeps `>` inside path tokens.

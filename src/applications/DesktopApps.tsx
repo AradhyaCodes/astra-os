@@ -7,7 +7,9 @@ export function Settings() {
   const [mounts, setMounts] = useState<MountView[]>([]);
   const [message, setMessage] = useState("");
   const [reducedGlass, setReducedGlass] = useState(
-    () => localStorage.getItem("aaru-reduced-glass") === "1",
+    () =>
+      (localStorage.getItem("astra-reduced-glass") ??
+        localStorage.getItem("aaru-reduced-glass")) === "1",
   );
 
   const refresh = () =>
@@ -20,7 +22,7 @@ export function Settings() {
 
   const toggleGlass = (value: boolean) => {
     setReducedGlass(value);
-    localStorage.setItem("aaru-reduced-glass", value ? "1" : "0");
+    localStorage.setItem("astra-reduced-glass", value ? "1" : "0");
     document.documentElement.classList.toggle("reduce-glass", value);
   };
 
@@ -77,7 +79,7 @@ export function Settings() {
           <div>
             <h3>HOST mounts</h3>
             <p>
-              Mounted laptop folders stay under an alias. Aaru does not encrypt or lock
+              Mounted laptop folders stay under an alias. Astra does not encrypt or lock
               Windows files.
             </p>
           </div>
@@ -210,7 +212,7 @@ export function Calculator() {
   };
   return (
     <div className="calculator-app">
-      <div className="calc-mode">AARU STANDARD</div>
+      <div className="calc-mode">ASTRA STANDARD</div>
       <output>{display}</output>
       <div className="calc-grid">
         {CALC_KEYS.map((key) => (
@@ -347,7 +349,7 @@ export function HostWarning({
         <h2 id="host-warning-title">Physical file warning</h2>
         <strong>THIS ACTION AFFECTS PHYSICAL FILES ON THIS COMPUTER.</strong>
         <p>{action}</p>
-        <p>Aaru cannot undo changes made outside its virtual filesystem.</p>
+        <p>Astra cannot undo changes made outside its virtual filesystem.</p>
         <div className="warning-actions">
           <button type="button" onClick={onCancel}>
             Cancel

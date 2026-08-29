@@ -1,4 +1,4 @@
-# Aaru-OS Desktop Design
+# Astra OS Desktop Design
 
 ## World
 

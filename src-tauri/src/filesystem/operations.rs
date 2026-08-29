@@ -5,7 +5,7 @@ use super::model::{
 use super::path::{components, depth, join, normalize_path, split_path};
 use super::tree_parser::{parse_tree, TreeNode};
 use super::validation::{ensure_depth, ensure_within_budget, validate_name};
-use crate::error::AaruError;
+use crate::error::AstraError;
 use serde::Serialize;
 use std::collections::BTreeSet;
 
@@ -30,7 +30,7 @@ pub struct SearchResults {
 }
 
 impl VirtualFileSystem {
-    pub fn resolve_path(&self, cwd: &str, path: &str) -> Result<ResourceId, AaruError> {
+    pub fn resolve_path(&self, cwd: &str, path: &str) -> Result<ResourceId, AstraError> {
         let canonical = normalize_path(cwd, path)?;
         let mut current_id = ROOT_ID;
 
@@ -38,10 +38,10 @@ impl VirtualFileSystem {
             let current = self.resource(current_id)?;
             let children = current
                 .children()
-                .ok_or_else(|| AaruError::NotADirectory(self.path_for_id(current_id)))?;
+                .ok_or_else(|| AstraError::NotADirectory(self.path_for_id(current_id)))?;
             current_id = *children
                 .get(&component)
-                .ok_or_else(|| AaruError::PathNotFound(canonical.clone()))?;
+                .ok_or_else(|| AstraError::PathNotFound(canonical.clone()))?;
         }
 
         Ok(current_id)
@@ -52,30 +52,30 @@ impl VirtualFileSystem {
             .expect("the root resource must always exist")
     }
 
-    pub fn parent_directory(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AaruError> {
+    pub fn parent_directory(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AstraError> {
         let id = self.resolve_path(cwd, path)?;
         let resource = self.resource(id)?;
         let parent_id = resource.metadata.parent.unwrap_or(ROOT_ID);
         self.info_for_id(parent_id)
     }
 
-    pub fn open_directory(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AaruError> {
+    pub fn open_directory(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AstraError> {
         let id = self.resolve_path(cwd, path)?;
         let resource = self.resource(id)?;
         if resource.metadata.resource_type != ResourceType::Directory {
-            return Err(AaruError::NotADirectory(self.path_for_id(id)));
+            return Err(AstraError::NotADirectory(self.path_for_id(id)));
         }
         self.ensure_readable(resource, &self.path_for_id(id))?;
         self.info_for_id(id)
     }
 
-    pub fn list_directory(&self, cwd: &str, path: &str) -> Result<Vec<ResourceInfo>, AaruError> {
+    pub fn list_directory(&self, cwd: &str, path: &str) -> Result<Vec<ResourceInfo>, AstraError> {
         let id = self.resolve_path(cwd, path)?;
         let resource = self.resource(id)?;
         self.ensure_readable(resource, &self.path_for_id(id))?;
         let children = resource
             .children()
-            .ok_or_else(|| AaruError::NotADirectory(self.path_for_id(id)))?;
+            .ok_or_else(|| AstraError::NotADirectory(self.path_for_id(id)))?;
 
         children
             .values()
@@ -83,12 +83,12 @@ impl VirtualFileSystem {
             .collect()
     }
 
-    pub fn inspect(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AaruError> {
+    pub fn inspect(&self, cwd: &str, path: &str) -> Result<ResourceInfo, AstraError> {
         let id = self.resolve_path(cwd, path)?;
         self.info_for_id(id)
     }
 
-    pub fn create_directory(&mut self, cwd: &str, path: &str) -> Result<ResourceInfo, AaruError> {
+    pub fn create_directory(&mut self, cwd: &str, path: &str) -> Result<ResourceInfo, AstraError> {
         let canonical = normalize_path(cwd, path)?;
         let (parent_path, name) = split_path(&canonical)?;
         validate_name(&name, ResourceType::Directory)?;
@@ -103,7 +103,7 @@ impl VirtualFileSystem {
         cwd: &str,
         path: &str,
         content: &str,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         let canonical = normalize_path(cwd, path)?;
         let (parent_path, name) = split_path(&canonical)?;
         validate_name(&name, ResourceType::File)?;
@@ -120,7 +120,7 @@ impl VirtualFileSystem {
         cwd: &str,
         path: &str,
         data: &[u8],
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         let canonical = normalize_path(cwd, path)?;
         let (parent_path, name) = split_path(&canonical)?;
         validate_name(&name, ResourceType::File)?;
@@ -133,7 +133,7 @@ impl VirtualFileSystem {
         let parent = self.resource_mut(parent_id)?;
         parent
             .children_mut()
-            .ok_or_else(|| AaruError::NotADirectory(parent_path.clone()))?
+            .ok_or_else(|| AstraError::NotADirectory(parent_path.clone()))?
             .insert(name.clone(), id);
         parent.metadata.modified_at_ms = unix_time_ms();
         self.resources.insert(
@@ -147,7 +147,7 @@ impl VirtualFileSystem {
         &mut self,
         cwd: &str,
         expression: &str,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         let tree = parse_tree(expression)?;
         let mut staged = self.clone();
         let parent_id = staged.resolve_path(cwd, ".")?;
@@ -163,20 +163,19 @@ impl VirtualFileSystem {
         cwd: &str,
         path: &str,
         new_name: &str,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         let id = self.resolve_path(cwd, path)?;
         if id == ROOT_ID {
-            return Err(AaruError::PermissionDenied(
+            return Err(AstraError::PermissionDenied(
                 "the root directory cannot be renamed".to_string(),
             ));
         }
 
         let resource_type = self.resource(id)?.metadata.resource_type;
         validate_name(new_name, resource_type)?;
-        let parent_id =
-            self.resource(id)?.metadata.parent.ok_or_else(|| {
-                AaruError::Filesystem("resource has no parent directory".to_string())
-            })?;
+        let parent_id = self.resource(id)?.metadata.parent.ok_or_else(|| {
+            AstraError::Filesystem("resource has no parent directory".to_string())
+        })?;
         self.ensure_directory_writable(parent_id)?;
 
         let old_name = self.resource(id)?.metadata.name.clone();
@@ -189,7 +188,7 @@ impl VirtualFileSystem {
             .children()
             .is_some_and(|children| children.contains_key(new_name))
         {
-            return Err(AaruError::DuplicateName {
+            return Err(AstraError::DuplicateName {
                 name: new_name.to_string(),
                 dir: parent_path,
             });
@@ -197,7 +196,7 @@ impl VirtualFileSystem {
 
         let parent = self.resource_mut(parent_id)?;
         let children = parent.children_mut().ok_or_else(|| {
-            AaruError::NotADirectory("parent resource is not a directory".to_string())
+            AstraError::NotADirectory("parent resource is not a directory".to_string())
         })?;
         children.remove(&old_name);
         children.insert(new_name.to_string(), id);
@@ -214,7 +213,7 @@ impl VirtualFileSystem {
         cwd: &str,
         source_path: &str,
         destination_directory: &str,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         let mut staged = self.clone();
         let id = staged.move_resource_inner(cwd, source_path, destination_directory)?;
         let result = staged.info_for_id(id)?;
@@ -227,11 +226,11 @@ impl VirtualFileSystem {
         cwd: &str,
         source_path: &str,
         destination_directory: &str,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         let mut staged = self.clone();
         let source_id = staged.resolve_path(cwd, source_path)?;
         if source_id == ROOT_ID {
-            return Err(AaruError::PermissionDenied(
+            return Err(AstraError::PermissionDenied(
                 "the root directory cannot be copied".to_string(),
             ));
         }
@@ -254,31 +253,30 @@ impl VirtualFileSystem {
         Ok(result)
     }
 
-    pub fn delete_preview(&self, cwd: &str, path: &str) -> Result<DeleteSummary, AaruError> {
+    pub fn delete_preview(&self, cwd: &str, path: &str) -> Result<DeleteSummary, AstraError> {
         let id = self.resolve_path(cwd, path)?;
         if id == ROOT_ID {
-            return Err(AaruError::PermissionDenied(
+            return Err(AstraError::PermissionDenied(
                 "the root directory cannot be deleted".to_string(),
             ));
         }
         self.summarize_subtree(id)
     }
 
-    pub fn delete_recursive(&mut self, cwd: &str, path: &str) -> Result<DeleteSummary, AaruError> {
+    pub fn delete_recursive(&mut self, cwd: &str, path: &str) -> Result<DeleteSummary, AstraError> {
         let mut staged = self.clone();
         let id = staged.resolve_path(cwd, path)?;
         if id == ROOT_ID {
-            return Err(AaruError::PermissionDenied(
+            return Err(AstraError::PermissionDenied(
                 "the root directory cannot be deleted".to_string(),
             ));
         }
         staged.ensure_subtree_deletable(id)?;
         let summary = staged.summarize_subtree(id)?;
         let resource = staged.resource(id)?.clone();
-        let parent_id = resource
-            .metadata
-            .parent
-            .ok_or_else(|| AaruError::Filesystem("resource has no parent directory".to_string()))?;
+        let parent_id = resource.metadata.parent.ok_or_else(|| {
+            AstraError::Filesystem("resource has no parent directory".to_string())
+        })?;
         staged.ensure_directory_writable(parent_id)?;
         let ids = staged.collect_subtree_ids(id)?;
 
@@ -286,7 +284,7 @@ impl VirtualFileSystem {
         let parent = staged.resource_mut(parent_id)?;
         parent
             .children_mut()
-            .ok_or(AaruError::NotADirectory(parent_path))?
+            .ok_or(AstraError::NotADirectory(parent_path))?
             .remove(&resource.metadata.name);
         parent.metadata.modified_at_ms = unix_time_ms();
         for resource_id in ids {
@@ -303,9 +301,9 @@ impl VirtualFileSystem {
         start_path: &str,
         query: &str,
         skip_inaccessible: bool,
-    ) -> Result<SearchResults, AaruError> {
+    ) -> Result<SearchResults, AstraError> {
         if query.is_empty() {
-            return Err(AaruError::InvalidArgument(
+            return Err(AstraError::InvalidArgument(
                 "search query cannot be empty".to_string(),
             ));
         }
@@ -315,7 +313,7 @@ impl VirtualFileSystem {
         Ok(results)
     }
 
-    pub fn read_file(&self, cwd: &str, path: &str) -> Result<String, AaruError> {
+    pub fn read_file(&self, cwd: &str, path: &str) -> Result<String, AstraError> {
         let id = self.resolve_path(cwd, path)?;
         let resource = self.resource(id)?;
         self.ensure_readable(resource, &self.path_for_id(id))?;
@@ -324,17 +322,17 @@ impl VirtualFileSystem {
                 content,
                 bytes: None,
             } => Ok(content.clone()),
-            ResourceData::File { bytes: Some(_), .. } => Err(AaruError::InvalidArgument(format!(
+            ResourceData::File { bytes: Some(_), .. } => Err(AstraError::InvalidArgument(format!(
                 "{} holds binary data — use 'almanac reveal' or open it on the host",
                 self.path_for_id(id)
             ))),
-            ResourceData::Directory { .. } => Err(AaruError::NotAFile(self.path_for_id(id))),
+            ResourceData::Directory { .. } => Err(AstraError::NotAFile(self.path_for_id(id))),
         }
     }
 
     /// Read a file's payload as raw bytes — text files as their UTF-8 bytes,
     /// binary files as their stored bytes.
-    pub fn read_file_bytes(&self, cwd: &str, path: &str) -> Result<Vec<u8>, AaruError> {
+    pub fn read_file_bytes(&self, cwd: &str, path: &str) -> Result<Vec<u8>, AstraError> {
         let id = self.resolve_path(cwd, path)?;
         let resource = self.resource(id)?;
         self.ensure_readable(resource, &self.path_for_id(id))?;
@@ -346,7 +344,7 @@ impl VirtualFileSystem {
                 content,
                 bytes: None,
             } => Ok(content.clone().into_bytes()),
-            ResourceData::Directory { .. } => Err(AaruError::NotAFile(self.path_for_id(id))),
+            ResourceData::Directory { .. } => Err(AstraError::NotAFile(self.path_for_id(id))),
         }
     }
 
@@ -355,14 +353,14 @@ impl VirtualFileSystem {
         cwd: &str,
         path: &str,
         content: &str,
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         let id = self.resolve_path(cwd, path)?;
         let path = self.path_for_id(id);
         let previous_size = {
             let resource = self.resource(id)?;
             self.ensure_writable(resource, &path)?;
             if resource.metadata.resource_type != ResourceType::File {
-                return Err(AaruError::NotAFile(path));
+                return Err(AstraError::NotAFile(path));
             }
             resource.metadata.size
         };
@@ -377,7 +375,7 @@ impl VirtualFileSystem {
             bytes,
         } = &mut resource.data
         else {
-            return Err(AaruError::NotAFile(path));
+            return Err(AstraError::NotAFile(path));
         };
         *existing = content.to_string();
         *bytes = None;
@@ -392,14 +390,14 @@ impl VirtualFileSystem {
         cwd: &str,
         path: &str,
         data: &[u8],
-    ) -> Result<ResourceInfo, AaruError> {
+    ) -> Result<ResourceInfo, AstraError> {
         let id = self.resolve_path(cwd, path)?;
         let path = self.path_for_id(id);
         let previous_size = {
             let resource = self.resource(id)?;
             self.ensure_writable(resource, &path)?;
             if resource.metadata.resource_type != ResourceType::File {
-                return Err(AaruError::NotAFile(path));
+                return Err(AstraError::NotAFile(path));
             }
             resource.metadata.size
         };
@@ -414,7 +412,7 @@ impl VirtualFileSystem {
             bytes,
         } = &mut resource.data
         else {
-            return Err(AaruError::NotAFile(path));
+            return Err(AstraError::NotAFile(path));
         };
         existing.clear();
         *bytes = Some(data.to_vec());
@@ -428,19 +426,18 @@ impl VirtualFileSystem {
         cwd: &str,
         source_path: &str,
         destination_directory: &str,
-    ) -> Result<ResourceId, AaruError> {
+    ) -> Result<ResourceId, AstraError> {
         let source_id = self.resolve_path(cwd, source_path)?;
         if source_id == ROOT_ID {
-            return Err(AaruError::PermissionDenied(
+            return Err(AstraError::PermissionDenied(
                 "the root directory cannot be moved".to_string(),
             ));
         }
         let destination_id = self.resolve_path(cwd, destination_directory)?;
         let source = self.resource(source_id)?.clone();
-        let old_parent_id = source
-            .metadata
-            .parent
-            .ok_or_else(|| AaruError::Filesystem("resource has no parent directory".to_string()))?;
+        let old_parent_id = source.metadata.parent.ok_or_else(|| {
+            AstraError::Filesystem("resource has no parent directory".to_string())
+        })?;
         if old_parent_id == destination_id {
             return Ok(source_id);
         }
@@ -456,14 +453,14 @@ impl VirtualFileSystem {
         let old_parent = self.resource_mut(old_parent_id)?;
         old_parent
             .children_mut()
-            .ok_or(AaruError::NotADirectory(old_parent_path))?
+            .ok_or(AstraError::NotADirectory(old_parent_path))?
             .remove(&source.metadata.name);
         old_parent.metadata.modified_at_ms = unix_time_ms();
 
         let destination = self.resource_mut(destination_id)?;
         destination
             .children_mut()
-            .ok_or_else(|| AaruError::NotADirectory(destination_path.clone()))?
+            .ok_or_else(|| AstraError::NotADirectory(destination_path.clone()))?
             .insert(source.metadata.name.clone(), source_id);
         destination.metadata.modified_at_ms = unix_time_ms();
 
@@ -478,7 +475,7 @@ impl VirtualFileSystem {
         parent_id: ResourceId,
         parent_path: &str,
         node: &TreeNode,
-    ) -> Result<ResourceId, AaruError> {
+    ) -> Result<ResourceId, AstraError> {
         validate_name(&node.name, ResourceType::Directory)?;
         let path = join(parent_path, &node.name);
         ensure_depth(&path, depth(&path)?)?;
@@ -494,14 +491,14 @@ impl VirtualFileSystem {
         parent_id: ResourceId,
         name: &str,
         parent_path: &str,
-    ) -> Result<ResourceId, AaruError> {
+    ) -> Result<ResourceId, AstraError> {
         self.ensure_directory_writable(parent_id)?;
         self.ensure_child_name_available(parent_id, name, parent_path)?;
         let id = self.allocate_id();
         let parent = self.resource_mut(parent_id)?;
         parent
             .children_mut()
-            .ok_or_else(|| AaruError::NotADirectory(parent_path.to_string()))?
+            .ok_or_else(|| AstraError::NotADirectory(parent_path.to_string()))?
             .insert(name.to_string(), id);
         parent.metadata.modified_at_ms = unix_time_ms();
         self.resources.insert(
@@ -517,14 +514,14 @@ impl VirtualFileSystem {
         name: &str,
         content: &str,
         parent_path: &str,
-    ) -> Result<ResourceId, AaruError> {
+    ) -> Result<ResourceId, AstraError> {
         self.ensure_directory_writable(parent_id)?;
         self.ensure_child_name_available(parent_id, name, parent_path)?;
         let id = self.allocate_id();
         let parent = self.resource_mut(parent_id)?;
         parent
             .children_mut()
-            .ok_or_else(|| AaruError::NotADirectory(parent_path.to_string()))?
+            .ok_or_else(|| AstraError::NotADirectory(parent_path.to_string()))?
             .insert(name.to_string(), id);
         parent.metadata.modified_at_ms = unix_time_ms();
         self.resources.insert(
@@ -538,7 +535,7 @@ impl VirtualFileSystem {
         &mut self,
         source_id: ResourceId,
         destination_parent_id: ResourceId,
-    ) -> Result<ResourceId, AaruError> {
+    ) -> Result<ResourceId, AstraError> {
         let source = self.resource(source_id)?.clone();
         let new_id = self.allocate_id();
         let now = unix_time_ms();
@@ -557,7 +554,7 @@ impl VirtualFileSystem {
         let destination = self.resource_mut(destination_parent_id)?;
         destination
             .children_mut()
-            .ok_or(AaruError::NotADirectory(destination_path))?
+            .ok_or(AstraError::NotADirectory(destination_path))?
             .insert(copy.metadata.name.clone(), new_id);
         destination.metadata.modified_at_ms = now;
         self.resources.insert(new_id, copy);
@@ -574,7 +571,7 @@ impl VirtualFileSystem {
         &self,
         source_id: ResourceId,
         destination_id: ResourceId,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         let destination_path = self.path_for_id(destination_id);
         let destination_depth = depth(&destination_path)?;
         let target_depth = destination_depth + 1 + self.subtree_height(source_id)?;
@@ -582,7 +579,7 @@ impl VirtualFileSystem {
         ensure_depth(&target_path, target_depth)
     }
 
-    fn subtree_height(&self, id: ResourceId) -> Result<usize, AaruError> {
+    fn subtree_height(&self, id: ResourceId) -> Result<usize, AstraError> {
         let resource = self.resource(id)?;
         let Some(children) = resource.children() else {
             return Ok(0);
@@ -599,14 +596,14 @@ impl VirtualFileSystem {
         source_id: ResourceId,
         destination_id: ResourceId,
         operation: &str,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         if self.resource(source_id)?.metadata.resource_type != ResourceType::Directory {
             return Ok(());
         }
         let mut cursor = Some(destination_id);
         while let Some(id) = cursor {
             if id == source_id {
-                return Err(AaruError::InvalidMove(format!(
+                return Err(AstraError::InvalidMove(format!(
                     "cannot {operation} a directory into itself or one of its descendants"
                 )));
             }
@@ -615,7 +612,7 @@ impl VirtualFileSystem {
         Ok(())
     }
 
-    fn summarize_subtree(&self, id: ResourceId) -> Result<DeleteSummary, AaruError> {
+    fn summarize_subtree(&self, id: ResourceId) -> Result<DeleteSummary, AstraError> {
         let resource = self.resource(id)?;
         let mut summary = match resource.metadata.resource_type {
             ResourceType::File => DeleteSummary {
@@ -643,7 +640,7 @@ impl VirtualFileSystem {
         Ok(summary)
     }
 
-    fn ensure_subtree_deletable(&self, id: ResourceId) -> Result<(), AaruError> {
+    fn ensure_subtree_deletable(&self, id: ResourceId) -> Result<(), AstraError> {
         let resource = self.resource(id)?;
         self.ensure_writable(resource, &self.path_for_id(id))?;
         if let Some(children) = resource.children() {
@@ -654,7 +651,7 @@ impl VirtualFileSystem {
         Ok(())
     }
 
-    fn collect_subtree_ids(&self, id: ResourceId) -> Result<Vec<ResourceId>, AaruError> {
+    fn collect_subtree_ids(&self, id: ResourceId) -> Result<Vec<ResourceId>, AstraError> {
         let mut ids = Vec::new();
         if let Some(children) = self.resource(id)?.children() {
             for child_id in children.values() {
@@ -671,7 +668,7 @@ impl VirtualFileSystem {
         query: &str,
         skip_inaccessible: bool,
         results: &mut SearchResults,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         let resource = self.resource(id)?;
         let path = self.path_for_id(id);
         if resource.metadata.locked || !resource.metadata.permissions.read {
@@ -679,7 +676,7 @@ impl VirtualFileSystem {
                 results.skipped_subtrees.push(path);
                 return Ok(());
             }
-            return Err(AaruError::PermissionDenied(format!(
+            return Err(AstraError::PermissionDenied(format!(
                 "cannot search inaccessible resource: {path}"
             )));
         }
@@ -694,18 +691,18 @@ impl VirtualFileSystem {
         Ok(())
     }
 
-    pub(crate) fn resource_by_id(&self, id: ResourceId) -> Result<&Resource, AaruError> {
+    pub(crate) fn resource_by_id(&self, id: ResourceId) -> Result<&Resource, AstraError> {
         self.resource(id)
     }
 
     pub(crate) fn resource_mut_by_id(
         &mut self,
         id: ResourceId,
-    ) -> Result<&mut Resource, AaruError> {
+    ) -> Result<&mut Resource, AstraError> {
         self.resource_mut(id)
     }
 
-    pub(crate) fn resource_info(&self, id: ResourceId) -> Result<ResourceInfo, AaruError> {
+    pub(crate) fn resource_info(&self, id: ResourceId) -> Result<ResourceInfo, AstraError> {
         self.info_for_id(id)
     }
 
@@ -713,7 +710,7 @@ impl VirtualFileSystem {
         self.path_for_id(id)
     }
 
-    pub(crate) fn ancestor_ids(&self, id: ResourceId) -> Result<Vec<ResourceId>, AaruError> {
+    pub(crate) fn ancestor_ids(&self, id: ResourceId) -> Result<Vec<ResourceId>, AstraError> {
         let mut ids = Vec::new();
         let mut cursor = Some(id);
         while let Some(resource_id) = cursor {
@@ -724,7 +721,7 @@ impl VirtualFileSystem {
         Ok(ids)
     }
 
-    pub(crate) fn subtree_ids(&self, id: ResourceId) -> Result<Vec<ResourceId>, AaruError> {
+    pub(crate) fn subtree_ids(&self, id: ResourceId) -> Result<Vec<ResourceId>, AstraError> {
         self.collect_subtree_ids(id)
     }
 
@@ -736,7 +733,7 @@ impl VirtualFileSystem {
         &self,
         source_id: ResourceId,
         copied_id: ResourceId,
-    ) -> Result<Vec<(ResourceId, ResourceId)>, AaruError> {
+    ) -> Result<Vec<(ResourceId, ResourceId)>, AstraError> {
         let mut pairs = vec![(source_id, copied_id)];
         let source = self.resource(source_id)?;
         let copied = self.resource(copied_id)?;
@@ -745,7 +742,7 @@ impl VirtualFileSystem {
         {
             for (name, source_child_id) in source_children {
                 let copied_child_id = copied_children.get(name).ok_or_else(|| {
-                    AaruError::Filesystem(format!("copied subtree is missing resource '{name}'"))
+                    AstraError::Filesystem(format!("copied subtree is missing resource '{name}'"))
                 })?;
                 pairs.extend(self.parallel_subtree_pairs(*source_child_id, *copied_child_id)?);
             }
@@ -753,27 +750,27 @@ impl VirtualFileSystem {
         Ok(pairs)
     }
 
-    fn ensure_directory_writable(&self, id: ResourceId) -> Result<(), AaruError> {
+    fn ensure_directory_writable(&self, id: ResourceId) -> Result<(), AstraError> {
         let resource = self.resource(id)?;
         let path = self.path_for_id(id);
         if resource.metadata.resource_type != ResourceType::Directory {
-            return Err(AaruError::NotADirectory(path));
+            return Err(AstraError::NotADirectory(path));
         }
         self.ensure_writable(resource, &path)
     }
 
-    fn ensure_readable(&self, resource: &Resource, path: &str) -> Result<(), AaruError> {
+    fn ensure_readable(&self, resource: &Resource, path: &str) -> Result<(), AstraError> {
         if !resource.metadata.permissions.read {
-            return Err(AaruError::PermissionDenied(format!(
+            return Err(AstraError::PermissionDenied(format!(
                 "resource is not readable: {path}"
             )));
         }
         Ok(())
     }
 
-    fn ensure_writable(&self, resource: &Resource, path: &str) -> Result<(), AaruError> {
+    fn ensure_writable(&self, resource: &Resource, path: &str) -> Result<(), AstraError> {
         if !resource.metadata.permissions.write {
-            return Err(AaruError::PermissionDenied(format!(
+            return Err(AstraError::PermissionDenied(format!(
                 "resource is not writable: {path}"
             )));
         }
@@ -785,13 +782,13 @@ impl VirtualFileSystem {
         parent_id: ResourceId,
         name: &str,
         parent_path: &str,
-    ) -> Result<(), AaruError> {
+    ) -> Result<(), AstraError> {
         let parent = self.resource(parent_id)?;
         let children = parent
             .children()
-            .ok_or_else(|| AaruError::NotADirectory(parent_path.to_string()))?;
+            .ok_or_else(|| AstraError::NotADirectory(parent_path.to_string()))?;
         if children.contains_key(name) {
-            return Err(AaruError::DuplicateName {
+            return Err(AstraError::DuplicateName {
                 name: name.to_string(),
                 dir: parent_path.to_string(),
             });
@@ -799,19 +796,19 @@ impl VirtualFileSystem {
         Ok(())
     }
 
-    fn resource(&self, id: ResourceId) -> Result<&Resource, AaruError> {
+    fn resource(&self, id: ResourceId) -> Result<&Resource, AstraError> {
         self.resources.get(&id).ok_or_else(|| {
-            AaruError::Filesystem(format!("resource ID {id} is missing from the filesystem"))
+            AstraError::Filesystem(format!("resource ID {id} is missing from the filesystem"))
         })
     }
 
-    fn resource_mut(&mut self, id: ResourceId) -> Result<&mut Resource, AaruError> {
+    fn resource_mut(&mut self, id: ResourceId) -> Result<&mut Resource, AstraError> {
         self.resources.get_mut(&id).ok_or_else(|| {
-            AaruError::Filesystem(format!("resource ID {id} is missing from the filesystem"))
+            AstraError::Filesystem(format!("resource ID {id} is missing from the filesystem"))
         })
     }
 
-    fn info_for_id(&self, id: ResourceId) -> Result<ResourceInfo, AaruError> {
+    fn info_for_id(&self, id: ResourceId) -> Result<ResourceInfo, AstraError> {
         let resource = self.resource(id)?;
         Ok(ResourceInfo {
             path: self.path_for_id(id),
@@ -1072,19 +1069,21 @@ mod tests {
     fn resolves_paths_searches_recursively_and_inspects_metadata() {
         let mut filesystem = VirtualFileSystem::new();
         filesystem
-            .create_tree_atomic("ROOT>Projects", "AaruOS>(Frontend,Backend)")
+            .create_tree_atomic("ROOT>Projects", "AstraOS>(Frontend,Backend)")
             .unwrap();
         let file = filesystem
-            .create_file("ROOT>Projects>AaruOS>Backend", "server.rs", "fn main() {}")
+            .create_file("ROOT>Projects>AstraOS>Backend", "server.rs", "fn main() {}")
             .unwrap();
         let resolved = filesystem
-            .open_directory("ROOT>Projects", "AaruOS>Backend")
+            .open_directory("ROOT>Projects", "AstraOS>Backend")
             .unwrap();
-        assert_eq!(resolved.path, "ROOT>Projects>AaruOS>Backend");
-        let results = filesystem.search("ROOT", "Projects", "Aaru", true).unwrap();
+        assert_eq!(resolved.path, "ROOT>Projects>AstraOS>Backend");
+        let results = filesystem
+            .search("ROOT", "Projects", "Astra", true)
+            .unwrap();
         assert_eq!(results.matches.len(), 1);
         let inspected = filesystem
-            .inspect("ROOT", "Projects>AaruOS>Backend>server.rs")
+            .inspect("ROOT", "Projects>AstraOS>Backend>server.rs")
             .unwrap();
         assert_eq!(inspected.metadata.id, file.metadata.id);
         assert_eq!(inspected.metadata.size, 12);

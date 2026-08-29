@@ -1,6 +1,6 @@
 //! Structured result of evaluating an Almanac line.
 
-use crate::error::AaruError;
+use crate::error::AstraError;
 use crate::shell::HostCommand;
 use serde::Serialize;
 
@@ -55,15 +55,15 @@ impl OutputLine {
     }
 
     /// Map a backend error onto the most appropriate status tag.
-    pub fn from_error(error: &AaruError) -> Self {
+    pub fn from_error(error: &AstraError) -> Self {
         let tag = match error {
-            AaruError::PermissionDenied(_) => StatusTag::Denied,
-            AaruError::ResourceAuthenticationRequired(_) => StatusTag::Locked,
-            AaruError::AuthenticationRequired
-            | AaruError::AuthenticationFailed
-            | AaruError::AccountLocked { .. }
-            | AaruError::CredentialsNotConfigured
-            | AaruError::CredentialsAlreadyConfigured => StatusTag::Auth,
+            AstraError::PermissionDenied(_) => StatusTag::Denied,
+            AstraError::ResourceAuthenticationRequired(_) => StatusTag::Locked,
+            AstraError::AuthenticationRequired
+            | AstraError::AuthenticationFailed
+            | AstraError::AccountLocked { .. }
+            | AstraError::CredentialsNotConfigured
+            | AstraError::CredentialsAlreadyConfigured => StatusTag::Auth,
             _ => StatusTag::Error,
         };
         OutputLine::new(tag, error.to_string())
@@ -142,7 +142,7 @@ impl AlmanacOutcome {
         self.lines.push(OutputLine::new(tag, text));
     }
 
-    pub fn from_error(error: &AaruError) -> Self {
+    pub fn from_error(error: &AstraError) -> Self {
         Self {
             lines: vec![OutputLine::from_error(error)],
             ..Self::default()

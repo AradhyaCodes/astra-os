@@ -19,7 +19,7 @@ function readError(reason: unknown) {
 /**
  * HostApps — the "Applications" window.
  *
- * Lists the real Windows applications Aaru knows how to launch and shows which
+ * Lists the real Windows applications Astra knows how to launch and shows which
  * are installed on this machine. Detection happens entirely in Rust
  * (`host_apps` command); launching goes through `almanac run <name>` so the
  * Almanac console stays the single launcher surface.
@@ -51,7 +51,7 @@ export function HostApps({ onLaunch }: HostAppsProps) {
         <div>
           <h2>Windows Apps</h2>
           <p>
-            Real Windows apps Aaru can launch. Detection is read-only; launching runs{" "}
+            Real Windows apps Astra can launch. Detection is read-only; launching runs{" "}
             <code>almanac run &lt;name&gt;</code>.
           </p>
         </div>
@@ -127,7 +127,7 @@ export function HostApps({ onLaunch }: HostAppsProps) {
 
       <footer className="host-apps-footer">
         <span className="resource-badge host">HOST</span>
-        These processes run on Windows — Aaru only tracks them.
+        These processes run on Windows — Astra only tracks them.
       </footer>
     </div>
   );

@@ -1,4 +1,4 @@
-//! Centralised configuration for the simulated Aaru memory subsystem.
+//! Centralised configuration for the simulated Astra memory subsystem.
 //!
 //! Every number the paging model depends on lives here so it can never drift
 //! and never changes at runtime. **None of this describes the real Windows
@@ -33,7 +33,7 @@ pub const fn pages_for_mb(mb: u32) -> usize {
     }
 }
 
-/// A centrally defined initial simulated-memory footprint for one Aaru process.
+/// A centrally defined initial simulated-memory footprint for one Astra process.
 pub struct MemoryProfile {
     /// Matched case-insensitively against the launched application's name.
     pub key: &'static str,
@@ -41,7 +41,7 @@ pub struct MemoryProfile {
     pub resident_mb: u32,
 }
 
-/// Footprint used for any Aaru-native process without an explicit profile.
+/// Footprint used for any Astra-native process without an explicit profile.
 pub const DEFAULT_RESIDENT_MB: u32 = 16;
 
 /// The initial working set of every built-in, in one place. These are *fixed*

@@ -171,9 +171,9 @@ mod tests {
 
     fn echo_command() -> HostCommand {
         if cfg!(windows) {
-            HostCommand::new("cmd", vec!["/C".into(), "echo".into(), "aaru".into()])
+            HostCommand::new("cmd", vec!["/C".into(), "echo".into(), "astra".into()])
         } else {
-            HostCommand::new("printf", vec!["aaru".into()])
+            HostCommand::new("printf", vec!["astra".into()])
         }
     }
 
@@ -194,7 +194,7 @@ mod tests {
         assert_eq!(code, 0);
         assert!(events.iter().any(|event| matches!(
             event,
-            StreamEvent::Stdout { line } if line.contains("aaru")
+            StreamEvent::Stdout { line } if line.contains("astra")
         )));
         assert!(events
             .iter()
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn missing_executable_is_command_not_found() {
         let result = SystemProcessRunner.run(
-            &HostCommand::new("aaru-nonexistent-binary-xyz", vec![]),
+            &HostCommand::new("astra-nonexistent-binary-xyz", vec![]),
             &mut |_| {},
         );
         assert!(matches!(result, Err(HostError::NotFound(_))));

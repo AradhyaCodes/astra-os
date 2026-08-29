@@ -10,8 +10,8 @@
 
 use super::engine::{NATIVE_VERBS, PATH_VERBS};
 use super::lexer::{is_almanac_line, lex, split_unescaped_gt, ALMANAC_KEYWORD};
-use crate::error::AaruError;
-use crate::fs_provider::AaruLocation;
+use crate::error::AstraError;
+use crate::fs_provider::AstraLocation;
 use crate::state::SystemState;
 use serde::Serialize;
 
@@ -109,7 +109,7 @@ fn complete_path(state: &SystemState, cwd: &str, partial: &str) -> CompletionRes
 
     let children = match child_names(state, cwd, &parent_relative) {
         Ok(children) => children,
-        Err(AaruError::ResourceAuthenticationRequired(_)) => return CompletionResult::locked(),
+        Err(AstraError::ResourceAuthenticationRequired(_)) => return CompletionResult::locked(),
         Err(_) => return CompletionResult::default(),
     };
 
@@ -140,14 +140,14 @@ fn complete_path(state: &SystemState, cwd: &str, partial: &str) -> CompletionRes
 /// * a path inside a mount → that host directory's entries.
 ///
 /// Lock boundaries are honoured on both sides: a directory the session has not
-/// authenticated surfaces as [`AaruError::ResourceAuthenticationRequired`].
+/// authenticated surfaces as [`AstraError::ResourceAuthenticationRequired`].
 fn child_names(
     state: &SystemState,
     cwd: &str,
     parent_relative: &str,
-) -> Result<Vec<String>, AaruError> {
+) -> Result<Vec<String>, AstraError> {
     match state.route(cwd, parent_relative)? {
-        AaruLocation::Virtual(_) => {
+        AstraLocation::Virtual(_) => {
             let mut names: Vec<String> = state
                 .completion_children(cwd, parent_relative)?
                 .into_iter()
@@ -160,12 +160,12 @@ fn child_names(
             }
             Ok(names)
         }
-        AaruLocation::HostRoot => Ok(state
+        AstraLocation::HostRoot => Ok(state
             .host_mount_list()?
             .into_iter()
             .map(|mount| mount.alias)
             .collect()),
-        AaruLocation::Host { mount, relative } => Ok(state
+        AstraLocation::Host { mount, relative } => Ok(state
             .host_list(&mount, &relative)?
             .into_iter()
             .map(|entry| entry.name)
@@ -211,12 +211,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut state = state(&dir);
         state
-            .create_tree("ROOT>Projects", "AaruOS>(Frontend,Backend)")
+            .create_tree("ROOT>Projects", "AstraOS>(Frontend,Backend)")
             .unwrap();
-        let result = complete(&state, "ROOT", "almanac open Projects>AaruOS>Fro");
+        let result = complete(&state, "ROOT", "almanac open Projects>AstraOS>Fro");
         assert_eq!(
             result.replacement.as_deref(),
-            Some("Projects>AaruOS>Frontend")
+            Some("Projects>AstraOS>Frontend")
         );
     }
 

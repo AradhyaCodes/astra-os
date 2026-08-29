@@ -1,4 +1,4 @@
-//! Aaru-OS — Library entry point
+//! Astra OS — Library entry point
 //!
 //! Declares all kernel submodules and wires up the Tauri application builder
 //! with IPC command handlers and plugins.
@@ -37,17 +37,28 @@ pub fn run() {
     // Default to "info" in debug builds.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    log::info!("Aaru-OS v0.1 starting…");
+    log::info!("Astra OS v0.1 starting…");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let state_path = app.path().app_data_dir()?.join("state.json");
+            let app_data_dir = app.path().app_data_dir()?;
+            let state_path = app_data_dir.join("state.json");
+            if !state_path.exists() {
+                if let Some(parent) = app_data_dir.parent() {
+                    let legacy_state = parent.join("com.aaru.os").join("state.json");
+                    if legacy_state.exists() {
+                        std::fs::create_dir_all(&app_data_dir)?;
+                        std::fs::copy(&legacy_state, &state_path)?;
+                        log::info!("migrated the Aaru-OS profile into Astra OS");
+                    }
+                }
+            }
             let persistence = crate::persistence::JsonPersistence::new(state_path);
             let report = persistence.load_recovering()?;
             if let Some(notice) = &report.recovery_notice {
-                log::warn!("Aaru-OS persistence recovery: {notice}");
+                log::warn!("Astra OS persistence recovery: {notice}");
             }
 
             let mut system = crate::state::SystemState::from_snapshot(report.snapshot, persistence);
@@ -137,5 +148,5 @@ pub fn run() {
             commands::host_apps,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Aaru-OS");
+        .expect("error while running Astra OS");
 }
