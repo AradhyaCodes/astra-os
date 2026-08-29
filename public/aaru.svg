@@ -1,4 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#11151e"/>
-  <path d="M18 45 29 17h6l11 28h-7l-2.2-6H27.2L25 45h-7Zm11.2-12h5.6L32 24.8 29.2 33Z" fill="#aeb1ff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Aaru-OS A mark</title>
+  <path
+    fill="#8b7cff"
+    fill-rule="evenodd"
+    d="M229 48h54l205 416H377l-47-101H182l-47 101H24L229 48Zm27 137-43 96h86l-43-96Z"
+  />
 </svg>

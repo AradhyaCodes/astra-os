@@ -29,10 +29,12 @@ interface AppIconProps extends SVGProps<SVGSVGElement> {
 export function AppIcon({ name, ...props }: AppIconProps) {
   const paths: Record<IconName, ReactElement> = {
     aaru: (
-      <>
-        <path d="M12 2 3.7 6.7v10.6L12 22l8.3-4.7V6.7L12 2Z" />
-        <path d="m8.2 15.7 3.8-8 3.8 8M9.8 12.3h4.4" />
-      </>
+      <path
+        d="M10.7 2.25h2.6l9.45 19.5h-5.1l-2.15-4.7h-7l-2.15 4.7h-5.1l9.45-19.5ZM12 8.7l-2.05 4.6h4.1L12 8.7Z"
+        fill="#8b7cff"
+        fillRule="evenodd"
+        stroke="none"
+      />
     ),
     terminal: (
       <>
