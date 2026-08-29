@@ -1,5 +1,7 @@
 # Aaru-OS
 
+<img src="public/aaru-logo.png" alt="Aaru-OS logo" width="96" />
+
 A Windows-inspired **operating-system simulator** that runs as a real desktop
 application. The graphical desktop is a thin view layer; a Rust system core
 owns a persistent virtual filesystem, a deterministic CPU scheduler, a
@@ -8,6 +10,9 @@ simulated memory/paging model, a process registry, a security model, and the
 only through explicit, clearly-labelled bridges.
 
 > Built with **Tauri 2 · React 19 · TypeScript · Rust**.
+
+The app uses a single-color violet **A** mark across the favicon, in-app UI,
+Windows shortcuts, and packaged application icons.
 
 ---
 
@@ -34,7 +39,7 @@ only through explicit, clearly-labelled bridges.
 | **Almanac shell** | A single command language for navigation, file operations, process/scheduler/memory inspection, host mounts, and lifecycle. Type `almanac` in the console for the full reference. |
 | **CPU scheduler** | Round-robin / FCFS / priority, switchable at runtime, with per-core utilisation, ready-queue, context-switch counts and wait/turnaround/response averages. |
 | **Memory model** | Simulated RAM, frames, swap and page tables with FIFO or LRU replacement; page-fault / hit counters. Independent of real Windows memory. |
-| **Process registry** | Simulated and host-backed processes in one table, with terminate / suspend / resume. |
+| **Process registry** | Simulated and host-backed processes share one table. Aaru can terminate processes it launched; suspend / resume applies to simulated processes only. |
 | **Security** | Local profile password (Argon2 hashes only), lockout after repeated failures, and password-locked directory subtrees — inside Aaru only. |
 | **HOST bridge** | Mount a Windows folder as `HOST>alias` for live in-place read/write; launch installed Windows apps; copy/transfer between `HOST>` and the virtual tree. |
 | **Windows Apps panel** | Detects which known desktop / Microsoft Store apps are installed and launches them (`claude`, `chatgpt`, `vsc`, `antigravity`, `chrome`, …). |
@@ -82,6 +87,17 @@ npm run tauri build
 Installers are written to `src-tauri/target/release/bundle/` (NSIS `-setup.exe`
 and MSI on Windows). The first build downloads the bundler toolchains.
 
+To build only the Windows MSI:
+
+```bash
+npm run tauri -- build --bundles msi
+```
+
+The MSI is written to `src-tauri/target/release/bundle/msi/`. After changing
+Windows icon files, run
+`cargo clean --manifest-path src-tauri/Cargo.toml --release` before rebuilding
+so Cargo regenerates the executable's embedded icon resource.
+
 ---
 
 ## The Almanac command language
@@ -111,9 +127,10 @@ as the separator; `AARU` and `ROOT` both name the virtual root.
 | `memory [policy <FIFO\|LRU>]` | Inspect the RAM / swap / paging model |
 | `logout` · `kill lapsession` · `hibernate` · `restart` | Lifecycle |
 
-Quick launch words (also usable as `in <App>`): `claude`, `chatgpt`, `google`,
-`vsc`, `antigravity`, `brave`, `chrome`. Anything the parser doesn't recognise
-is handed to the controlled host shell (`git`, `npm`, `python`, …).
+Bare quick-launch words are `claude`, `chatgpt`, `google`, `vsc`, `antigravity`,
+`brave` and `chrome`. Desktop apps that accept file paths can also be used with
+`in <App>`. Input that is neither an `almanac ...` command nor a quick-launch
+word is sent to the controlled host shell (`git`, `npm`, `python`, …).
 
 Quote any path segment that contains spaces:
 `almanac open "HOST>Desktop>My Project>app.js" in vsc`.
@@ -142,8 +159,8 @@ reported. Prefer working in place under `HOST>` for anything large.
 ## How state is stored
 
 Durable state — the virtual filesystem (including binary payloads, base64), its
-metadata, permissions, lock hashes, settings, command history and host-mount
-records — is saved to `state.json` in Tauri's app-data directory
+metadata, permissions, lock hashes, command history and host-mount records — is
+saved to `state.json` in Tauri's app-data directory
 (`%APPDATA%\com.aaru.os\` on Windows). Writes go through a flushed temp file
 and a backup swap so an interrupted write can recover.
 
@@ -201,9 +218,11 @@ cargo fmt   --manifest-path src-tauri/Cargo.toml -- --check
 
 - It does **not** encrypt, hide, or change permissions on real Windows files.
   An Aaru "lock" only gates access inside Aaru-OS.
-- Mounted host resources are real. Destructive host actions (`destroy`,
-  cross-boundary `transfer`) move files to the Windows Recycle Bin and prompt
-  first.
+- Mounted host resources are real. `destroy` previews the affected items, asks
+  for confirmation, and moves them to the Windows Recycle Bin.
+- Cross-boundary `transfer` copies first and removes the source only when no
+  entries were skipped. A `HOST>` source is moved to the Recycle Bin without a
+  separate confirmation prompt.
 - The scheduler, memory and process simulation are teaching models. Tracked
   host processes are *observed* — Windows schedules them, not Aaru.
 
