@@ -1,0 +1,940 @@
+//! The host filesystem bridge.
+//!
+//! A [`HostFilesystem`] holds a table of **explicitly approved** mount roots
+//! (canonicalised Windows directories). Every access is:
+//!
+//! 1. logically routed (`HOST>alias>rel…`) by [`super::router`],
+//! 2. joined onto the mount root,
+//! 3. re-checked so the real, canonical path still lives under that root
+//!    (defeating `..`, prefix confusion and symlink/junction escape for the
+//!    parts that already exist).
+//!
+//! Aaru's *virtual* naming rules (extension-or-dotfile names, depth cap, …)
+//! are **not** applied to pre-existing host resources. New host resources are
+//! validated against Windows naming rules only.
+
+use crate::error::AaruError;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Component, Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Scheme label that selects the host provider.
+pub const HOST_LABEL: &str = "HOST";
+
+/// Recursion / result guards so a `lookout` over a huge tree stays bounded.
+const MAX_SEARCH_DEPTH: usize = 16;
+const MAX_SEARCH_HITS: usize = 2000;
+
+/// Real user directories, injected from Tauri's path resolver so this module
+/// stays testable and free of hardcoded usernames.
+#[derive(Debug, Clone, Default)]
+pub struct HostDirs {
+    pub desktop: Option<PathBuf>,
+    pub documents: Option<PathBuf>,
+    pub downloads: Option<PathBuf>,
+    pub home: Option<PathBuf>,
+    /// `%PUBLIC%\Desktop` — the all-users Desktop where system-wide app
+    /// shortcuts live. Windows Explorer shows this merged with the user's own
+    /// Desktop; the Aaru bridge keeps it a separate, explicit mount.
+    pub public_desktop: Option<PathBuf>,
+}
+
+/// One approved mount.
+#[derive(Debug, Clone)]
+pub struct HostMount {
+    pub alias: String,
+    /// Canonical, absolute directory this mount is pinned to.
+    pub root: PathBuf,
+    /// The path as originally chosen (for display).
+    pub source: String,
+    pub is_default: bool,
+}
+
+/// Serialisable record of a *user* mount, persisted across restarts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostMountRecord {
+    pub alias: String,
+    pub path: String,
+}
+
+/// What `almanac mount` / `mounts` shows the user.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MountView {
+    pub alias: String,
+    pub source: String,
+    pub is_default: bool,
+    pub available: bool,
+}
+
+/// A single host directory entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HostEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified_ms: Option<u64>,
+    pub created_ms: Option<u64>,
+    pub read_only: bool,
+}
+
+/// Result of a host "delete".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HostDeleteOutcome {
+    pub files: u64,
+    pub folders: u64,
+    pub recycled: bool,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct HostFilesystem {
+    mounts: BTreeMap<String, HostMount>,
+}
+
+impl HostFilesystem {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Build the standard set of safe user mounts that actually exist.
+    pub fn with_defaults(dirs: &HostDirs) -> Self {
+        let mut filesystem = Self::new();
+        filesystem.install_defaults(dirs);
+        filesystem
+    }
+
+    /// Restore persisted user mounts, then (re)install the default mounts.
+    pub fn restore(records: &[HostMountRecord], dirs: &HostDirs) -> Self {
+        let mut filesystem = Self::new();
+        for record in records {
+            let path = PathBuf::from(&record.path);
+            if let Ok(canonical) = dunce::canonicalize(&path) {
+                if canonical.is_dir() {
+                    let alias = filesystem.unique_alias(sanitize_alias(&record.alias));
+                    filesystem.mounts.insert(
+                        alias.clone(),
+                        HostMount {
+                            alias,
+                            root: canonical,
+                            source: record.path.clone(),
+                            is_default: false,
+                        },
+                    );
+                }
+            }
+        }
+        filesystem.install_defaults(dirs);
+        filesystem
+    }
+
+    fn install_defaults(&mut self, dirs: &HostDirs) {
+        let candidates = [
+            ("Desktop", dirs.desktop.clone()),
+            ("PublicDesktop", dirs.public_desktop.clone()),
+            ("Documents", dirs.documents.clone()),
+            ("Downloads", dirs.downloads.clone()),
+            (
+                "Projects",
+                dirs.home.as_ref().map(|home| home.join("Projects")),
+            ),
+        ];
+        for (alias, path) in candidates {
+            let Some(path) = path else { continue };
+            // Never *create* a missing default (spec: don't auto-create Projects).
+            let Ok(canonical) = dunce::canonicalize(&path) else {
+                continue;
+            };
+            if !canonical.is_dir() || self.mounts.contains_key(alias) {
+                continue;
+            }
+            self.mounts.insert(
+                alias.to_string(),
+                HostMount {
+                    alias: alias.to_string(),
+                    root: canonical,
+                    source: path.display().to_string(),
+                    is_default: true,
+                },
+            );
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Mount table management
+    // ------------------------------------------------------------------
+
+    /// Approve a new directory. `source` must resolve to a real directory; the
+    /// alias is derived from it (or `requested_alias`) and made unique
+    /// deterministically on collision.
+    pub fn mount(
+        &mut self,
+        source: &Path,
+        requested_alias: Option<&str>,
+    ) -> Result<String, AaruError> {
+        let canonical = dunce::canonicalize(source)
+            .map_err(|error| AaruError::PathNotFound(format!("{}: {error}", source.display())))?;
+        if !canonical.is_dir() {
+            return Err(AaruError::NotADirectory(canonical.display().to_string()));
+        }
+
+        let base = requested_alias
+            .map(sanitize_alias)
+            .filter(|alias| !alias.is_empty())
+            .or_else(|| {
+                canonical
+                    .file_name()
+                    .map(|name| sanitize_alias(&name.to_string_lossy()))
+            })
+            .filter(|alias| !alias.is_empty())
+            .unwrap_or_else(|| "Mount".to_string());
+
+        // Re-mounting the exact same directory is idempotent.
+        if let Some(existing) = self.mounts.values().find(|mount| mount.root == canonical) {
+            return Ok(existing.alias.clone());
+        }
+
+        let alias = self.unique_alias(base);
+        self.mounts.insert(
+            alias.clone(),
+            HostMount {
+                alias: alias.clone(),
+                root: canonical,
+                source: source.display().to_string(),
+                is_default: false,
+            },
+        );
+        Ok(alias)
+    }
+
+    pub fn unmount(&mut self, alias: &str) -> Result<(), AaruError> {
+        if self.mounts.remove(alias).is_none() {
+            return Err(AaruError::PathNotFound(format!(
+                "no host mount named '{alias}'"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn list_mounts(&self) -> Vec<MountView> {
+        self.mounts
+            .values()
+            .map(|mount| MountView {
+                alias: mount.alias.clone(),
+                source: mount.source.clone(),
+                is_default: mount.is_default,
+                available: mount.root.is_dir(),
+            })
+            .collect()
+    }
+
+    /// User (non-default) mounts, for persistence.
+    pub fn user_records(&self) -> Vec<HostMountRecord> {
+        self.mounts
+            .values()
+            .filter(|mount| !mount.is_default)
+            .map(|mount| HostMountRecord {
+                alias: mount.alias.clone(),
+                path: mount.root.display().to_string(),
+            })
+            .collect()
+    }
+
+    pub fn mount_aliases(&self) -> Vec<String> {
+        self.mounts.keys().cloned().collect()
+    }
+
+    /// Best-effort `HOST>alias>rel…` label for a stored canonical path id.
+    pub fn display_for_id(&self, canonical_id: &str) -> String {
+        let candidate = PathBuf::from(canonical_id);
+        for mount in self.mounts.values() {
+            if let Ok(relative) = candidate.strip_prefix(&mount.root) {
+                let rel: Vec<String> = relative
+                    .components()
+                    .filter_map(|component| match component {
+                        Component::Normal(part) => Some(part.to_string_lossy().to_string()),
+                        _ => None,
+                    })
+                    .collect();
+                return display(&mount.alias, &rel);
+            }
+        }
+        format!("{HOST_LABEL}>(unmounted)")
+    }
+
+    fn unique_alias(&self, base: String) -> String {
+        if !self.mounts.contains_key(&base) {
+            return base;
+        }
+        (2..)
+            .map(|suffix| format!("{base}-{suffix}"))
+            .find(|candidate| !self.mounts.contains_key(candidate))
+            .expect("an unused alias always exists")
+    }
+
+    // ------------------------------------------------------------------
+    // Path resolution + traversal guard
+    // ------------------------------------------------------------------
+
+    fn mount_of(&self, alias: &str) -> Result<&HostMount, AaruError> {
+        self.mounts.get(alias).ok_or_else(|| {
+            AaruError::PathNotFound(format!(
+                "no host mount named '{alias}' (try 'almanac mount')"
+            ))
+        })
+    }
+
+    /// Join `relative` onto the mount root and verify the real, canonical path
+    /// does not escape it. Returns the (possibly not-yet-existing) target path.
+    pub fn resolve(&self, alias: &str, relative: &[String]) -> Result<PathBuf, AaruError> {
+        let mount = self.mount_of(alias)?;
+        let mut target = mount.root.clone();
+        for segment in relative {
+            if segment.is_empty()
+                || segment == "."
+                || segment == ".."
+                || segment.contains(['/', '\\', ':'])
+            {
+                return Err(AaruError::InvalidPath(format!(
+                    "illegal host path segment '{segment}'"
+                )));
+            }
+            target.push(segment);
+        }
+
+        // Canonicalise the longest existing prefix and confirm containment.
+        let anchor = longest_existing_ancestor(&target);
+        let canonical_anchor = dunce::canonicalize(&anchor).map_err(|error| {
+            AaruError::Filesystem(format!(
+                "could not canonicalise {}: {error}",
+                anchor.display()
+            ))
+        })?;
+        if !canonical_anchor.starts_with(&mount.root) {
+            return Err(AaruError::PermissionDenied(format!(
+                "path escapes the approved mount root {HOST_LABEL}>{alias}"
+            )));
+        }
+        // Reject `..` components that survived (belt and braces).
+        if target
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err(AaruError::PermissionDenied(
+                "'..' is not allowed in host paths".to_string(),
+            ));
+        }
+        Ok(target)
+    }
+
+    /// Stable canonical identifier for lock metadata.
+    pub fn canonical_id(&self, alias: &str, relative: &[String]) -> Result<String, AaruError> {
+        let target = self.resolve(alias, relative)?;
+        let canonical = match dunce::canonicalize(&target) {
+            Ok(path) => path,
+            Err(_) => {
+                let parent = target.parent().unwrap_or(&target);
+                let parent = dunce::canonicalize(parent).map_err(|error| {
+                    AaruError::Filesystem(format!("could not canonicalise parent: {error}"))
+                })?;
+                match target.file_name() {
+                    Some(name) => parent.join(name),
+                    None => parent,
+                }
+            }
+        };
+        Ok(canonical.to_string_lossy().to_string())
+    }
+
+    /// Canonical id for every mount-relative ancestor of a host path, closest
+    /// last. Used to find applicable Aaru locks.
+    pub fn ancestor_ids(&self, alias: &str, relative: &[String]) -> Result<Vec<String>, AaruError> {
+        let mut ids = Vec::new();
+        for depth in 0..=relative.len() {
+            ids.push(self.canonical_id(alias, &relative[..depth])?);
+        }
+        Ok(ids)
+    }
+
+    // ------------------------------------------------------------------
+    // Operations
+    // ------------------------------------------------------------------
+
+    pub fn entry(&self, alias: &str, relative: &[String]) -> Result<HostEntry, AaruError> {
+        let path = self.resolve(alias, relative)?;
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| AaruError::PathNotFound(format!("{}: {error}", path.display())))?;
+        Ok(describe(&path, &metadata))
+    }
+
+    pub fn real_path(&self, alias: &str, relative: &[String]) -> Result<PathBuf, AaruError> {
+        self.resolve(alias, relative)
+    }
+
+    pub fn list_dir(&self, alias: &str, relative: &[String]) -> Result<Vec<HostEntry>, AaruError> {
+        let path = self.resolve(alias, relative)?;
+        if !path.is_dir() {
+            return Err(AaruError::NotADirectory(display(alias, relative)));
+        }
+        let mut entries = Vec::new();
+        for item in fs::read_dir(&path)
+            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", path.display())))?
+        {
+            let item = item.map_err(|error| AaruError::Filesystem(error.to_string()))?;
+            if let Ok(metadata) = item.metadata() {
+                entries.push(describe(&item.path(), &metadata));
+            }
+        }
+        entries.sort_by_key(|entry| entry.name.to_lowercase());
+        Ok(entries)
+    }
+
+    pub fn read_text(&self, alias: &str, relative: &[String]) -> Result<String, AaruError> {
+        let path = self.resolve(alias, relative)?;
+        if !path.is_file() {
+            return Err(AaruError::NotAFile(display(alias, relative)));
+        }
+        let bytes = fs::read(&path)
+            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", path.display())))?;
+        String::from_utf8(bytes).map_err(|_| {
+            AaruError::InvalidArgument(format!(
+                "{} is not UTF-8 text and cannot be shown here",
+                display(alias, relative)
+            ))
+        })
+    }
+
+    /// Read a host file as raw bytes, no UTF-8 requirement.
+    pub fn read_bytes(&self, alias: &str, relative: &[String]) -> Result<Vec<u8>, AaruError> {
+        let path = self.resolve(alias, relative)?;
+        if !path.is_file() {
+            return Err(AaruError::NotAFile(display(alias, relative)));
+        }
+        fs::read(&path)
+            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", path.display())))
+    }
+
+    pub fn write_text(
+        &self,
+        alias: &str,
+        relative: &[String],
+        contents: &str,
+        must_exist: bool,
+    ) -> Result<HostEntry, AaruError> {
+        self.write_raw(alias, relative, contents.as_bytes(), must_exist)
+    }
+
+    /// Write raw bytes to a host file (no UTF-8 requirement).
+    pub fn write_bytes(
+        &self,
+        alias: &str,
+        relative: &[String],
+        data: &[u8],
+        must_exist: bool,
+    ) -> Result<HostEntry, AaruError> {
+        self.write_raw(alias, relative, data, must_exist)
+    }
+
+    fn write_raw(
+        &self,
+        alias: &str,
+        relative: &[String],
+        data: &[u8],
+        must_exist: bool,
+    ) -> Result<HostEntry, AaruError> {
+        let (_, leaf) = split_leaf(relative)?;
+        validate_windows_name(leaf)?;
+        let path = self.resolve(alias, relative)?;
+        if must_exist && !path.is_file() {
+            return Err(AaruError::PathNotFound(format!(
+                "{} — rewrite requires an existing host file",
+                display(alias, relative)
+            )));
+        }
+        if path.is_dir() {
+            return Err(AaruError::NotAFile(display(alias, relative)));
+        }
+        if let Some(parent) = path.parent() {
+            if !parent.is_dir() {
+                return Err(AaruError::PathNotFound(format!(
+                    "parent directory of {} does not exist",
+                    display(alias, relative)
+                )));
+            }
+        }
+        fs::write(&path, data)
+            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", path.display())))?;
+        self.entry(alias, relative)
+    }
+
+    pub fn create_dir(&self, alias: &str, relative: &[String]) -> Result<HostEntry, AaruError> {
+        let (_, leaf) = split_leaf(relative)?;
+        validate_windows_name(leaf)?;
+        let path = self.resolve(alias, relative)?;
+        if path.exists() {
+            return Err(AaruError::DuplicateName {
+                name: leaf.to_string(),
+                dir: display(alias, &relative[..relative.len().saturating_sub(1)]),
+            });
+        }
+        fs::create_dir(&path)
+            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", path.display())))?;
+        self.entry(alias, relative)
+    }
+
+    pub fn rename(
+        &self,
+        alias: &str,
+        relative: &[String],
+        new_name: &str,
+    ) -> Result<HostEntry, AaruError> {
+        validate_windows_name(new_name)?;
+        let source = self.resolve(alias, relative)?;
+        if !source.exists() {
+            return Err(AaruError::PathNotFound(display(alias, relative)));
+        }
+        let parent_rel = &relative[..relative.len().saturating_sub(1)];
+        let mut target_rel = parent_rel.to_vec();
+        target_rel.push(new_name.to_string());
+        let target = self.resolve(alias, &target_rel)?;
+        if target.exists() {
+            return Err(AaruError::DuplicateName {
+                name: new_name.to_string(),
+                dir: display(alias, parent_rel),
+            });
+        }
+        fs::rename(&source, &target)
+            .map_err(|error| AaruError::Filesystem(format!("rename failed: {error}")))?;
+        self.entry(alias, &target_rel)
+    }
+
+    /// Host→host move or copy. `destination_relative` must be an existing
+    /// directory inside the same mount table.
+    pub fn relocate(
+        &self,
+        from_alias: &str,
+        from_relative: &[String],
+        to_alias: &str,
+        to_relative: &[String],
+        copy: bool,
+    ) -> Result<HostEntry, AaruError> {
+        let source = self.resolve(from_alias, from_relative)?;
+        if !source.exists() {
+            return Err(AaruError::PathNotFound(display(from_alias, from_relative)));
+        }
+        let destination_dir = self.resolve(to_alias, to_relative)?;
+        if !destination_dir.is_dir() {
+            return Err(AaruError::NotADirectory(display(to_alias, to_relative)));
+        }
+        let name = source
+            .file_name()
+            .ok_or_else(|| AaruError::InvalidPath("source has no file name".to_string()))?
+            .to_os_string();
+        let target = destination_dir.join(&name);
+        if target.exists() {
+            return Err(AaruError::DuplicateName {
+                name: name.to_string_lossy().to_string(),
+                dir: display(to_alias, to_relative),
+            });
+        }
+        // Prevent moving a directory into itself / its own subtree.
+        if source.is_dir() && target.starts_with(&source) {
+            return Err(AaruError::InvalidMove(
+                "cannot move a directory into itself".to_string(),
+            ));
+        }
+
+        if copy {
+            copy_recursive(&source, &target)?;
+        } else if fs::rename(&source, &target).is_err() {
+            // Cross-volume rename fails; fall back to copy + recycle of source.
+            copy_recursive(&source, &target)?;
+            trash::delete(&source).map_err(|error| {
+                AaruError::Filesystem(format!(
+                    "moved by copy, but could not recycle the original: {error}"
+                ))
+            })?;
+        }
+
+        let mut target_rel = to_relative.to_vec();
+        target_rel.push(name.to_string_lossy().to_string());
+        self.entry(to_alias, &target_rel)
+    }
+
+    pub fn count_descendants(
+        &self,
+        alias: &str,
+        relative: &[String],
+    ) -> Result<(u64, u64), AaruError> {
+        let path = self.resolve(alias, relative)?;
+        if !path.exists() {
+            return Err(AaruError::PathNotFound(display(alias, relative)));
+        }
+        let mut files = 0;
+        let mut folders = 0;
+        count_into(&path, &mut files, &mut folders);
+        Ok((files, folders))
+    }
+
+    /// The host "delete": move the target to the Windows Recycle Bin. Never a
+    /// permanent recursive delete — if recycling fails we return the error.
+    pub fn recycle(
+        &self,
+        alias: &str,
+        relative: &[String],
+    ) -> Result<HostDeleteOutcome, AaruError> {
+        let path = self.resolve(alias, relative)?;
+        if !path.exists() {
+            return Err(AaruError::PathNotFound(display(alias, relative)));
+        }
+        if relative.is_empty() {
+            return Err(AaruError::PermissionDenied(
+                "a mount root itself cannot be deleted — unmount it instead".to_string(),
+            ));
+        }
+        let (files, folders) = self.count_descendants(alias, relative)?;
+        trash::delete(&path).map_err(|error| {
+            AaruError::Filesystem(format!(
+                "could not move {} to the Recycle Bin: {error} — nothing was deleted",
+                display(alias, relative)
+            ))
+        })?;
+        Ok(HostDeleteOutcome {
+            files,
+            folders,
+            recycled: true,
+        })
+    }
+
+    // ------------------------------------------------------------------
+    // Search
+    // ------------------------------------------------------------------
+
+    pub fn search(&self, query: &str, hits: &mut Vec<super::providers::SearchHit>) {
+        let needle = query.to_lowercase();
+        for mount in self.mounts.values() {
+            if hits.len() >= MAX_SEARCH_HITS {
+                break;
+            }
+            search_dir(&mount.root, &mount.alias, &mut Vec::new(), &needle, 0, hits);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Free helpers
+// ---------------------------------------------------------------------------
+
+fn display(alias: &str, relative: &[String]) -> String {
+    if relative.is_empty() {
+        format!("{HOST_LABEL}>{alias}")
+    } else {
+        format!("{HOST_LABEL}>{alias}>{}", relative.join(">"))
+    }
+}
+
+fn split_leaf(relative: &[String]) -> Result<(&[String], &str), AaruError> {
+    match relative.split_last() {
+        Some((leaf, parent)) => Ok((parent, leaf.as_str())),
+        None => Err(AaruError::InvalidPath(
+            "a host operation needs a target inside the mount, not the mount root".to_string(),
+        )),
+    }
+}
+
+fn longest_existing_ancestor(path: &Path) -> PathBuf {
+    let mut current = path.to_path_buf();
+    loop {
+        if current.exists() {
+            return current;
+        }
+        match current.parent() {
+            Some(parent) if parent != current => current = parent.to_path_buf(),
+            _ => return current,
+        }
+    }
+}
+
+fn system_time_ms(time: std::io::Result<SystemTime>) -> Option<u64> {
+    time.ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|delta| delta.as_millis().min(u128::from(u64::MAX)) as u64)
+}
+
+fn describe(path: &Path, metadata: &fs::Metadata) -> HostEntry {
+    HostEntry {
+        name: path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        is_dir: metadata.is_dir(),
+        size: if metadata.is_dir() { 0 } else { metadata.len() },
+        modified_ms: system_time_ms(metadata.modified()),
+        created_ms: system_time_ms(metadata.created()),
+        read_only: metadata.permissions().readonly(),
+    }
+}
+
+fn count_into(path: &Path, files: &mut u64, folders: &mut u64) {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if metadata.is_dir() {
+        *folders += 1;
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                count_into(&entry.path(), files, folders);
+            }
+        }
+    } else {
+        *files += 1;
+    }
+}
+
+fn copy_recursive(source: &Path, target: &Path) -> Result<(), AaruError> {
+    let metadata = fs::symlink_metadata(source)
+        .map_err(|error| AaruError::Filesystem(format!("{}: {error}", source.display())))?;
+    if metadata.is_dir() {
+        fs::create_dir(target)
+            .map_err(|error| AaruError::Filesystem(format!("{}: {error}", target.display())))?;
+        for entry in fs::read_dir(source)
+            .map_err(|error| AaruError::Filesystem(error.to_string()))?
+            .flatten()
+        {
+            copy_recursive(&entry.path(), &target.join(entry.file_name()))?;
+        }
+    } else {
+        fs::copy(source, target)
+            .map_err(|error| AaruError::Filesystem(format!("copy failed: {error}")))?;
+    }
+    Ok(())
+}
+
+fn search_dir(
+    dir: &Path,
+    alias: &str,
+    relative: &mut Vec<String>,
+    needle: &str,
+    depth: usize,
+    hits: &mut Vec<super::providers::SearchHit>,
+) {
+    if depth > MAX_SEARCH_DEPTH || hits.len() >= MAX_SEARCH_HITS {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if hits.len() >= MAX_SEARCH_HITS {
+            return;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        relative.push(name.clone());
+        if name.to_lowercase().contains(needle) {
+            hits.push(super::providers::SearchHit {
+                display: format!("{HOST_LABEL}>{alias}>{}", relative.join(">")),
+                kind: super::providers::ProviderKind::Host,
+            });
+        }
+        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            search_dir(&entry.path(), alias, relative, needle, depth + 1, hits);
+        }
+        relative.pop();
+    }
+}
+
+fn sanitize_alias(raw: &str) -> String {
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    cleaned.trim_matches(['_', '.', '-']).to_string()
+}
+
+/// Windows filename rules — deliberately *not* Aaru's virtual rules.
+pub fn validate_windows_name(name: &str) -> Result<(), AaruError> {
+    if name.is_empty() {
+        return Err(AaruError::InvalidName {
+            name: name.to_string(),
+            reason: "name cannot be empty".to_string(),
+        });
+    }
+    if name
+        .chars()
+        .any(|c| "<>:\"/\\|?*".contains(c) || (c as u32) < 0x20)
+    {
+        return Err(AaruError::InvalidName {
+            name: name.to_string(),
+            reason: r#"Windows names cannot contain < > : " / \ | ? * or control characters"#
+                .to_string(),
+        });
+    }
+    if name.ends_with('.') || name.ends_with(' ') {
+        return Err(AaruError::InvalidName {
+            name: name.to_string(),
+            reason: "Windows names cannot end with a space or a dot".to_string(),
+        });
+    }
+    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    const RESERVED: [&str; 22] = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    if RESERVED.contains(&stem.as_str()) {
+        return Err(AaruError::InvalidName {
+            name: name.to_string(),
+            reason: format!("'{stem}' is a reserved Windows device name"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_mount() -> (tempfile::TempDir, HostFilesystem, String) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("University")).unwrap();
+        std::fs::write(dir.path().join("University").join("report.pdf"), b"x").unwrap();
+        std::fs::write(dir.path().join("top level notes.txt"), b"hello").unwrap();
+        let mut host = HostFilesystem::new();
+        let alias = host.mount(dir.path(), Some("Dev")).unwrap();
+        (dir, host, alias)
+    }
+
+    #[test]
+    fn mounts_are_deduplicated_deterministically() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub_a = dir.path().join("a");
+        let sub_b = dir.path().join("b");
+        std::fs::create_dir(&sub_a).unwrap();
+        std::fs::create_dir(&sub_b).unwrap();
+        let mut host = HostFilesystem::new();
+        assert_eq!(host.mount(&sub_a, Some("Work")).unwrap(), "Work");
+        assert_eq!(host.mount(&sub_b, Some("Work")).unwrap(), "Work-2");
+        // Same directory again → same alias, no third mount.
+        assert_eq!(host.mount(&sub_a, Some("Work")).unwrap(), "Work");
+        assert_eq!(host.list_mounts().len(), 2);
+    }
+
+    #[test]
+    fn default_mounts_include_the_public_desktop_when_it_exists() {
+        let user_desktop = tempfile::tempdir().unwrap();
+        let public_desktop = tempfile::tempdir().unwrap();
+        let host = HostFilesystem::with_defaults(&HostDirs {
+            desktop: Some(user_desktop.path().to_path_buf()),
+            public_desktop: Some(public_desktop.path().to_path_buf()),
+            ..HostDirs::default()
+        });
+        let aliases = host.mount_aliases();
+        assert!(aliases.contains(&"Desktop".to_string()));
+        assert!(aliases.contains(&"PublicDesktop".to_string()));
+        // A missing public desktop is simply skipped (never created).
+        let host2 = HostFilesystem::with_defaults(&HostDirs {
+            public_desktop: Some(public_desktop.path().join("does-not-exist")),
+            ..HostDirs::default()
+        });
+        assert!(!host2.mount_aliases().contains(&"PublicDesktop".to_string()));
+    }
+
+    #[test]
+    fn unmount_removes_a_mount() {
+        let (_dir, mut host, alias) = temp_mount();
+        host.unmount(&alias).unwrap();
+        assert!(host.unmount(&alias).is_err());
+        assert!(host.list_dir(&alias, &[]).is_err());
+    }
+
+    #[test]
+    fn traversal_outside_the_mount_is_rejected() {
+        let (_dir, host, alias) = temp_mount();
+        assert!(matches!(
+            host.resolve(&alias, &["..".to_string(), "Windows".to_string()]),
+            Err(AaruError::InvalidPath(_))
+        ));
+        assert!(matches!(
+            host.resolve(&alias, &["sub\\..\\..".to_string()]),
+            Err(AaruError::InvalidPath(_))
+        ));
+    }
+
+    #[test]
+    fn host_names_keep_spaces_and_missing_extensions() {
+        let (_dir, host, alias) = temp_mount();
+        // Pre-existing file with spaces is inspectable.
+        let entry = host
+            .entry(&alias, &["top level notes.txt".to_string()])
+            .unwrap();
+        assert_eq!(entry.name, "top level notes.txt");
+        assert!(!entry.is_dir);
+        // Creating a new extensionless file is allowed under Windows rules.
+        host.write_text(&alias, &["Makefile".to_string()], "all:\n", false)
+            .unwrap();
+        assert!(host.entry(&alias, &["Makefile".to_string()]).is_ok());
+        // …but a reserved device name is refused.
+        assert!(host
+            .write_text(&alias, &["CON".to_string()], "", false)
+            .is_err());
+    }
+
+    #[test]
+    fn inspect_move_and_copy_on_host() {
+        let (_dir, host, alias) = temp_mount();
+        std::fs::create_dir(host.resolve(&alias, &["Archive".to_string()]).unwrap()).unwrap();
+
+        host.relocate(
+            &alias,
+            &["University".to_string(), "report.pdf".to_string()],
+            &alias,
+            &["Archive".to_string()],
+            true,
+        )
+        .unwrap();
+        assert!(host
+            .entry(&alias, &["Archive".to_string(), "report.pdf".to_string()])
+            .is_ok());
+        assert!(host
+            .entry(
+                &alias,
+                &["University".to_string(), "report.pdf".to_string()]
+            )
+            .is_ok());
+
+        host.relocate(
+            &alias,
+            &["University".to_string(), "report.pdf".to_string()],
+            &alias,
+            &["Archive".to_string()],
+            false,
+        )
+        .unwrap_err(); // name already exists in Archive
+    }
+
+    #[test]
+    fn count_descendants_walks_the_subtree() {
+        let (_dir, host, alias) = temp_mount();
+        let (files, folders) = host
+            .count_descendants(&alias, &["University".to_string()])
+            .unwrap();
+        assert_eq!(files, 1);
+        assert_eq!(folders, 1);
+    }
+
+    #[test]
+    fn search_matches_across_the_mount() {
+        let (_dir, host, alias) = temp_mount();
+        let mut hits = Vec::new();
+        host.search("report", &mut hits);
+        assert!(hits
+            .iter()
+            .any(|hit| hit.display == format!("HOST>{alias}>University>report.pdf")));
+    }
+}
