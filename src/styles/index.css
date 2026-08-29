@@ -1922,37 +1922,6 @@ html.reduce-glass .desktop-hint {
   border-color: rgba(99, 217, 230, 0.07);
 }
 
-.desktop-brand {
-  position: absolute;
-  top: 30px;
-  right: 34px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: rgba(241, 244, 249, 0.34);
-  user-select: none;
-}
-.desktop-brand > svg {
-  width: 31px;
-  height: 31px;
-  stroke-width: 1.25;
-}
-.desktop-brand div {
-  display: grid;
-  gap: 1px;
-}
-.desktop-brand strong {
-  font-size: 12px;
-  letter-spacing: 0.22em;
-}
-.desktop-brand span {
-  font:
-    8px/1.2 "Cascadia Mono",
-    Consolas,
-    monospace;
-  letter-spacing: 0.12em;
-}
-
 .desktop-icons {
   position: absolute;
   inset: 18px auto var(--desktop-taskbar) 18px;
@@ -3272,7 +3241,6 @@ html.reduce-glass .desktop-hint {
 }
 
 @media (max-width: 760px) {
-  .desktop-brand,
   .taskbar-context {
     display: none;
   }

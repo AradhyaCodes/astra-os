@@ -196,13 +196,6 @@ export function Desktop({
     >
       <div className="wallpaper-orbit orbit-one" />
       <div className="wallpaper-orbit orbit-two" />
-      <header className="desktop-brand" aria-label="Aaru OS desktop">
-        <AppIcon name="aaru" />
-        <div>
-          <strong>AARU</strong>
-          <span>DESKTOP ENVIRONMENT</span>
-        </div>
-      </header>
       <section className="desktop-icons" aria-label="Desktop resources">
         {RESOURCES.map((resource) => (
           <button
