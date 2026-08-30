@@ -55,7 +55,7 @@ export function BootScreen({ children }: BootScreenProps) {
           aria-label="Astra OS"
         >{`############################################
 #                                          #
-#              A  A  R  U                  #
+#              A  S  T  R  A               #
 #                 O  S                     #
 #                                          #
 ############################################`}</pre>
