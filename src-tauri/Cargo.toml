@@ -24,7 +24,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-base64 = "0.22"                   # compact persistence of binary file payloads
+base64 = "0.23"                   # compact persistence of binary file payloads
 argon2 = { version = "0.5", features = ["std"] }
 zeroize = "1"
 
