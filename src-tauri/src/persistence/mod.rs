@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -115,82 +115,66 @@ impl JsonPersistence {
     }
 
     pub fn load_recovering(&self) -> Result<LoadReport, AstraError> {
-        if let Some(size) = file_size(&self.path) {
-            if size > MAX_STATE_FILE_BYTES {
-                let sidelined = self.sideline_oversized_file()?;
-                return Ok(LoadReport {
-                    snapshot: PersistentSnapshot::default(),
-                    recovery_notice: Some(format!(
-                        "state file was {} MiB (over the {} MiB limit) — set aside as {} and \
-                         started fresh",
-                        size / (1024 * 1024),
-                        MAX_STATE_FILE_BYTES / (1024 * 1024),
-                        sidelined.display()
-                    )),
-                });
+        let mut notices = Vec::new();
+        for source in [&self.path, &self.backup_path()] {
+            if !source.exists() {
+                continue;
+            }
+            match read_snapshot(source) {
+                Ok(snapshot) => {
+                    if source != &self.path {
+                        notices.push("loaded the previous valid backup".to_string());
+                    }
+                    return Ok(LoadReport {
+                        snapshot,
+                        recovery_notice: (!notices.is_empty()).then(|| notices.join("; ")),
+                    });
+                }
+                Err(error @ AstraError::CorruptPersistence(_))
+                | Err(error @ AstraError::PersistenceTooLarge { .. }) => {
+                    let kind = if matches!(error, AstraError::PersistenceTooLarge { .. }) {
+                        "oversized"
+                    } else {
+                        "corrupt"
+                    };
+                    let quarantined = Self::quarantine_file(source, kind)?;
+                    notices.push(format!("{error}; set aside as {}", quarantined.display()));
+                }
+                // An older app must not quarantine or overwrite a newer profile.
+                Err(error) => return Err(error),
             }
         }
-        if !self.path.exists() && self.backup_path().exists() {
-            let snapshot = self.load()?.unwrap_or_default();
-            return Ok(LoadReport {
-                snapshot,
-                recovery_notice: Some(
-                    "primary snapshot was missing; loaded atomic backup".to_string(),
-                ),
-            });
-        }
-        match self.load() {
-            Ok(Some(snapshot)) => Ok(LoadReport {
-                snapshot,
-                recovery_notice: None,
-            }),
-            Ok(None) => Ok(LoadReport {
-                snapshot: PersistentSnapshot::default(),
-                recovery_notice: None,
-            }),
-            Err(AstraError::CorruptPersistence(reason)) => {
-                let quarantined = self.quarantine_corrupt_file()?;
-                let snapshot = self.load()?.unwrap_or_default();
-                Ok(LoadReport {
-                    snapshot,
-                    recovery_notice: Some(format!(
-                        "{reason}; corrupt snapshot moved to {}",
-                        quarantined.display()
-                    )),
-                })
-            }
-            Err(error) => Err(error),
-        }
+        Ok(LoadReport {
+            snapshot: PersistentSnapshot::default(),
+            recovery_notice: (!notices.is_empty()).then(|| notices.join("; ")),
+        })
     }
 
-    fn sideline_oversized_file(&self) -> Result<PathBuf, AstraError> {
+    /// Import an older product profile atomically, without replacing an existing
+    /// primary or recovery backup and without changing the source profile.
+    pub fn migrate_legacy_profile(legacy: &Path, target: &Path) -> Result<bool, AstraError> {
+        let target = Self::new(target.to_path_buf());
+        if target.path.exists() || target.backup_path().exists() {
+            return Ok(false);
+        }
+        let Some(snapshot) = Self::new(legacy.to_path_buf()).load()? else {
+            return Ok(false);
+        };
+        target.save(&snapshot)?;
+        Ok(true)
+    }
+
+    fn quarantine_file(source: &Path, kind: &str) -> Result<PathBuf, AstraError> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs();
-        let target = self
-            .path
-            .with_extension(format!("oversized-{timestamp}.json"));
-        fs::rename(&self.path, &target).map_err(|error| {
-            AstraError::Persistence(format!("could not set aside oversized state: {error}"))
+            .as_nanos();
+        let filename = source.file_name().unwrap_or_default().to_string_lossy();
+        let quarantined = source.with_file_name(format!("{filename}.{kind}-{timestamp}.json"));
+        fs::rename(source, &quarantined).map_err(|error| {
+            AstraError::Persistence(format!("could not quarantine state: {error}"))
         })?;
-        // A stale backup would just be re-loaded on the next boot.
-        let _ = fs::remove_file(self.backup_path());
-        Ok(target)
-    }
-
-    fn quarantine_corrupt_file(&self) -> Result<PathBuf, AstraError> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let corrupt_path = self
-            .path
-            .with_extension(format!("corrupt-{timestamp}.json"));
-        fs::rename(&self.path, &corrupt_path).map_err(|error| {
-            AstraError::Persistence(format!("could not quarantine corrupt state: {error}"))
-        })?;
-        Ok(corrupt_path)
+        Ok(quarantined)
     }
 
     fn temporary_path(&self) -> PathBuf {
@@ -224,6 +208,7 @@ impl PersistenceStore for JsonPersistence {
 
         let bytes = serde_json::to_vec_pretty(snapshot)
             .map_err(|error| AstraError::Serialization(error.to_string()))?;
+        check_snapshot_size(bytes.len() as u64)?;
         let temporary = self.temporary_path();
         if temporary.exists() {
             fs::remove_file(&temporary).map_err(|error| {
@@ -246,12 +231,12 @@ impl PersistenceStore for JsonPersistence {
         drop(file);
 
         let backup = self.backup_path();
-        if backup.exists() {
-            fs::remove_file(&backup).map_err(|error| {
-                AstraError::Persistence(format!("could not clear old state backup: {error}"))
-            })?;
-        }
         if self.path.exists() {
+            if backup.exists() {
+                fs::remove_file(&backup).map_err(|error| {
+                    AstraError::Persistence(format!("could not clear old state backup: {error}"))
+                })?;
+            }
             fs::rename(&self.path, &backup).map_err(|error| {
                 AstraError::Persistence(format!("could not stage existing state: {error}"))
             })?;
@@ -264,32 +249,47 @@ impl PersistenceStore for JsonPersistence {
                 "could not commit new state: {error}"
             )));
         }
-        if backup.exists() {
-            if let Err(error) = fs::remove_file(&backup) {
-                log::warn!("Could not clear committed state backup: {error}");
-            }
-        }
+        // Keep one previous committed snapshot for corruption/crash recovery.
         Ok(())
     }
 }
 
-fn file_size(path: &Path) -> Option<u64> {
-    fs::metadata(path).ok().map(|meta| meta.len())
+fn check_snapshot_size(size: u64) -> Result<(), AstraError> {
+    if size > MAX_STATE_FILE_BYTES {
+        return Err(AstraError::PersistenceTooLarge {
+            size,
+            limit: MAX_STATE_FILE_BYTES,
+        });
+    }
+    Ok(())
 }
 
 fn read_snapshot(path: &Path) -> Result<PersistentSnapshot, AstraError> {
-    let bytes = fs::read(path)
+    let file = fs::File::open(path)
+        .map_err(|error| AstraError::Persistence(format!("could not open state: {error}")))?;
+    let size = file
+        .metadata()
+        .map_err(|error| AstraError::Persistence(format!("could not inspect state: {error}")))?
+        .len();
+    check_snapshot_size(size)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_STATE_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
         .map_err(|error| AstraError::Persistence(format!("could not read state: {error}")))?;
+    check_snapshot_size(bytes.len() as u64)?;
+    // Read the version before deserializing this app version's full schema.
+    #[derive(Deserialize)]
+    struct SchemaHeader {
+        schema_version: u32,
+    }
+    let header: SchemaHeader = serde_json::from_slice(&bytes)
+        .map_err(|_| AstraError::CorruptPersistence("invalid state JSON".to_string()))?;
+    if !(MINIMUM_SCHEMA_VERSION..=CURRENT_SCHEMA_VERSION).contains(&header.schema_version) {
+        return Err(AstraError::UnsupportedSchema(header.schema_version));
+    }
     let mut snapshot: PersistentSnapshot = serde_json::from_slice(&bytes)
         .map_err(|_| AstraError::CorruptPersistence("invalid state JSON".to_string()))?;
-    if snapshot.schema_version < MINIMUM_SCHEMA_VERSION
-        || snapshot.schema_version > CURRENT_SCHEMA_VERSION
-    {
-        return Err(AstraError::CorruptPersistence(format!(
-            "unsupported state schema version {}",
-            snapshot.schema_version
-        )));
-    }
+    crate::filesystem::validation::validate_snapshot(&snapshot.filesystem)?;
     // Forward-migrate in memory; the next save rewrites at the current version.
     snapshot.schema_version = CURRENT_SCHEMA_VERSION;
     Ok(snapshot)
@@ -299,6 +299,172 @@ fn read_snapshot(path: &Path) -> Result<PersistentSnapshot, AstraError> {
 mod tests {
     use super::*;
     use std::fs::File;
+
+    #[test]
+    fn structurally_invalid_filesystems_are_rejected_before_runtime_use() {
+        use crate::filesystem::model::{Resource, ROOT_ID};
+        for case in [
+            "missing root",
+            "cycle",
+            "missing child",
+            "orphan",
+            "counter",
+            "size",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = JsonPersistence::new(directory.path().join("state.json"));
+            let mut snapshot = PersistentSnapshot::default();
+            match case {
+                "missing root" => {
+                    snapshot.filesystem.resources.remove(&ROOT_ID);
+                }
+                "cycle" => {
+                    snapshot
+                        .filesystem
+                        .resources
+                        .get_mut(&ROOT_ID)
+                        .unwrap()
+                        .children_mut()
+                        .unwrap()
+                        .insert("ROOT".to_string(), ROOT_ID);
+                }
+                "missing child" => {
+                    snapshot
+                        .filesystem
+                        .resources
+                        .get_mut(&ROOT_ID)
+                        .unwrap()
+                        .children_mut()
+                        .unwrap()
+                        .insert("missing".to_string(), 9999);
+                }
+                "orphan" => {
+                    let id = snapshot.filesystem.next_id;
+                    snapshot.filesystem.next_id += 1;
+                    snapshot.filesystem.resources.insert(
+                        id,
+                        Resource::directory(id, "orphan".to_string(), Some(ROOT_ID)),
+                    );
+                }
+                "counter" => {
+                    snapshot.filesystem.next_id = ROOT_ID;
+                }
+                "size" => {
+                    let file = snapshot
+                        .filesystem
+                        .create_file("ROOT", "size.txt", "hello")
+                        .unwrap();
+                    snapshot
+                        .filesystem
+                        .resources
+                        .get_mut(&file.metadata.id)
+                        .unwrap()
+                        .metadata
+                        .size = 0;
+                }
+                _ => unreachable!(),
+            }
+            fs::write(store.path(), serde_json::to_vec(&snapshot).unwrap()).unwrap();
+            assert!(
+                matches!(store.load(), Err(AstraError::CorruptPersistence(_))),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn previous_commit_survives_primary_corruption_and_the_next_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = JsonPersistence::new(directory.path().join("state.json"));
+        let mut snapshot = PersistentSnapshot::default();
+        snapshot.command_history.push("first".to_string());
+        store.save(&snapshot).unwrap();
+        snapshot.command_history.push("second".to_string());
+        store.save(&snapshot).unwrap();
+        assert!(store.backup_path().exists());
+        fs::write(store.path(), b"broken").unwrap();
+        let recovered = store.load_recovering().unwrap();
+        assert_eq!(recovered.snapshot.command_history, ["first"]);
+        assert!(recovered.recovery_notice.unwrap().contains("backup"));
+        store.save(&recovered.snapshot).unwrap();
+        assert!(store.backup_path().exists());
+        assert_eq!(store.load().unwrap().unwrap().command_history, ["first"]);
+    }
+
+    #[test]
+    fn oversized_backup_is_bounded_and_quarantined() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = JsonPersistence::new(directory.path().join("state.json"));
+        File::create(store.backup_path())
+            .unwrap()
+            .set_len(MAX_STATE_FILE_BYTES + 1)
+            .unwrap();
+        assert!(matches!(
+            store.load(),
+            Err(AstraError::PersistenceTooLarge { .. })
+        ));
+        let report = store.load_recovering().unwrap();
+        assert!(report.recovery_notice.unwrap().contains("over the"));
+        assert!(!store.backup_path().exists());
+    }
+
+    #[test]
+    fn two_corrupt_snapshots_are_preserved_without_crashing_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = JsonPersistence::new(directory.path().join("state.json"));
+        fs::write(store.path(), b"broken primary").unwrap();
+        fs::write(store.backup_path(), b"broken backup").unwrap();
+        let report = store.load_recovering().unwrap();
+        assert!(report.recovery_notice.is_some());
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+        assert!(!store.path().exists());
+        assert!(!store.backup_path().exists());
+    }
+
+    #[test]
+    fn future_schema_is_not_quarantined_or_replaced_by_an_older_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = JsonPersistence::new(directory.path().join("state.json"));
+        let future = br#"{"schema_version":999,"future_only":true}"#;
+        fs::write(store.path(), future).unwrap();
+        fs::write(
+            store.backup_path(),
+            serde_json::to_vec(&PersistentSnapshot::default()).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            store.load_recovering(),
+            Err(AstraError::UnsupportedSchema(999))
+        ));
+        assert_eq!(fs::read(store.path()).unwrap(), future);
+        assert!(store.backup_path().exists());
+    }
+
+    #[test]
+    fn legacy_migration_preserves_source_and_never_overwrites_a_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let legacy = JsonPersistence::new(directory.path().join("old.json"));
+        let target = JsonPersistence::new(directory.path().join("new.json"));
+        legacy.save(&PersistentSnapshot::default()).unwrap();
+        let original = fs::read(legacy.path()).unwrap();
+        assert!(JsonPersistence::migrate_legacy_profile(legacy.path(), target.path()).unwrap());
+        assert_eq!(fs::read(legacy.path()).unwrap(), original);
+        fs::rename(target.path(), target.backup_path()).unwrap();
+        assert!(!JsonPersistence::migrate_legacy_profile(legacy.path(), target.path()).unwrap());
+        assert!(!target.path().exists());
+        assert!(target.load().unwrap().is_some());
+    }
+
+    #[test]
+    fn invalid_legacy_profile_does_not_create_a_partial_target() {
+        let directory = tempfile::tempdir().unwrap();
+        let legacy = directory.path().join("old.json");
+        let target = directory.path().join("new.json");
+        fs::write(&legacy, b"broken").unwrap();
+        assert!(JsonPersistence::migrate_legacy_profile(&legacy, &target).is_err());
+        assert!(!target.exists());
+        assert_eq!(fs::read(legacy).unwrap(), b"broken");
+    }
 
     #[test]
     fn snapshots_round_trip_and_corruption_is_quarantined() {

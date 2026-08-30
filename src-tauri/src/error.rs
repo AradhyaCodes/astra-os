@@ -132,6 +132,12 @@ pub enum AstraError {
     #[error("persisted state is corrupt: {0}")]
     CorruptPersistence(String),
 
+    #[error("state file is {size} bytes, over the {limit}-byte limit")]
+    PersistenceTooLarge { size: u64, limit: u64 },
+
+    #[error("unsupported state schema version {0}; state was left untouched")]
+    UnsupportedSchema(u32),
+
     // ------------------------------------------------------------------
     // Tauri / IPC
     // ------------------------------------------------------------------

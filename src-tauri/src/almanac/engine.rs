@@ -398,6 +398,44 @@ fn relocate(
     to: &str,
     copy: bool,
 ) -> Result<AlmanacOutcome, AstraError> {
+    state.require_authentication()?;
+    let source = state.route(cwd, from)?;
+    let target = state.route(cwd, to)?;
+    let has_host = matches!(source, AstraLocation::Host { .. })
+        || matches!(target, AstraLocation::Host { .. });
+    let invalid_root =
+        matches!(source, AstraLocation::HostRoot) || matches!(target, AstraLocation::HostRoot);
+    if !copy && has_host && !invalid_root {
+        let id = state.next_prompt_id();
+        state.set_pending_prompt(PendingPrompt::TransferHostConfirm {
+            cwd: cwd.to_string(),
+            from: from.to_string(),
+            to: to.to_string(),
+        });
+        let mut outcome = AlmanacOutcome::line(
+            StatusTag::Info,
+            "This transfer affects real Windows files. Close editors modifying the source first.",
+        );
+        outcome.prompt = Some(PromptRequest {
+            id,
+            kind: "host_transfer_confirm".to_string(),
+            message: format!(
+                "Move {from} to {to}? This can change Windows files and remove the source (Y/N)"
+            ),
+            masked: false,
+        });
+        return Ok(outcome);
+    }
+    perform_relocate(state, cwd, from, to, copy)
+}
+
+fn perform_relocate(
+    state: &mut SystemState,
+    cwd: &str,
+    from: &str,
+    to: &str,
+    copy: bool,
+) -> Result<AlmanacOutcome, AstraError> {
     let verb = if copy { "copied to" } else { "moved to" };
     match (state.route(cwd, from)?, state.route(cwd, to)?) {
         (AstraLocation::Virtual(source), AstraLocation::Virtual(target)) => {
@@ -437,7 +475,7 @@ fn relocate(
                 ));
             }
             let summary = state.import_host_into_virtual(&from_mount, &from_rel, &target)?;
-            let mut outcome = touched(verb, &summary.created_path);
+            let mut outcome = touched("copied to", &summary.created_path);
             outcome.push(
                 StatusTag::Info,
                 format!(
@@ -475,7 +513,7 @@ fn relocate(
             },
         ) => {
             let summary = state.export_virtual_to_host(&source, &to_mount, &to_rel)?;
-            let mut outcome = touched(verb, &summary.created_path);
+            let mut outcome = touched("copied to", &summary.created_path);
             outcome.push(
                 StatusTag::Info,
                 format!(
@@ -1414,6 +1452,19 @@ fn respond_inner(state: &mut SystemState, response: &str) -> Result<AlmanacOutco
     match state.take_pending_prompt() {
         PendingPrompt::None => Err(AstraError::NoPendingPrompt),
 
+        PendingPrompt::TransferHostConfirm { cwd, from, to } => {
+            state.require_authentication()?;
+            if is_affirmative(response) {
+                // Re-check paths and permissions when executing, not only when asking.
+                perform_relocate(state, &cwd, &from, &to, false)
+            } else {
+                Ok(AlmanacOutcome::line(
+                    StatusTag::Info,
+                    "transfer cancelled; no files changed",
+                ))
+            }
+        }
+
         PendingPrompt::DestroyConfirm { path, total } => {
             if is_affirmative(response) {
                 let summary = state.delete_recursive("ROOT", &path)?;
@@ -1924,20 +1975,63 @@ mod tests {
             Some(StatusTag::Ok)
         );
         assert!(work.path().join("Archive").join("notes.txt").is_file());
-        assert_eq!(
-            evaluate(
-                &mut state,
-                "ROOT",
-                "almanac transfer HOST>Dev>fresh.txt HOST>Dev>Archive"
-            )
-            .first_tag(),
-            Some(StatusTag::Ok)
+        let pending = evaluate(
+            &mut state,
+            "ROOT",
+            "almanac transfer HOST>Dev>fresh.txt HOST>Dev>Archive",
         );
+        assert!(pending.prompt.is_some());
+        assert!(work.path().join("fresh.txt").exists());
+        assert_eq!(respond(&mut state, "yes").first_tag(), Some(StatusTag::Ok));
         assert!(!work.path().join("fresh.txt").exists());
 
         let search = evaluate(&mut state, "ROOT", "almanac lookout report");
         let joined = search.rendered().join("\n");
         assert!(joined.contains("HOST>Dev>University>report.pdf"));
+    }
+
+    #[test]
+    fn cancelling_a_host_transfer_leaves_both_endpoints_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let mut state = host_state(&dir, work.path());
+        let pending = evaluate(
+            &mut state,
+            "ROOT",
+            "almanac transfer HOST>Dev>notes.txt Documents",
+        );
+        assert!(pending.prompt.is_some());
+        respond(&mut state, "n");
+        assert_eq!(
+            std::fs::read(work.path().join("notes.txt")).unwrap(),
+            b"draft"
+        );
+        assert!(state.read_file("ROOT", "Documents>notes.txt").is_err());
+    }
+
+    #[test]
+    fn export_collision_preserves_both_source_and_host_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let mut state = host_state(&dir, work.path());
+        state
+            .create_file("ROOT", "Documents>notes.txt", "virtual original")
+            .unwrap();
+        let pending = evaluate(
+            &mut state,
+            "ROOT",
+            "almanac transfer Documents>notes.txt HOST>Dev",
+        );
+        assert!(pending.prompt.is_some());
+        assert_eq!(respond(&mut state, "y").first_tag(), Some(StatusTag::Error));
+        assert_eq!(
+            std::fs::read(work.path().join("notes.txt")).unwrap(),
+            b"draft"
+        );
+        assert_eq!(
+            state.read_file("ROOT", "Documents>notes.txt").unwrap(),
+            "virtual original"
+        );
     }
 
     #[test]
@@ -1981,15 +2075,15 @@ mod tests {
 
         // ASTRA → HOST transfer: the virtual file is written to the mount and
         // then removed from the Astra filesystem.
-        assert_eq!(
-            evaluate(
-                &mut state,
-                "ROOT",
-                "almanac transfer ASTRA>Documents>notes.txt HOST>Dev>University"
-            )
-            .first_tag(),
-            Some(StatusTag::Ok)
+        let pending = evaluate(
+            &mut state,
+            "ROOT",
+            "almanac transfer ASTRA>Documents>notes.txt HOST>Dev>University",
         );
+        assert!(pending.prompt.is_some());
+        assert!(state.read_file("ROOT", "Documents>notes.txt").is_ok());
+        assert!(!work.path().join("University").join("notes.txt").exists());
+        assert_eq!(respond(&mut state, "y").first_tag(), Some(StatusTag::Ok));
         assert_eq!(
             std::fs::read_to_string(work.path().join("University").join("notes.txt")).unwrap(),
             "draft"
@@ -2061,6 +2155,8 @@ mod tests {
             "ROOT",
             "almanac transfer HOST>Dev>mixed Documents",
         );
+        assert!(outcome.prompt.is_some());
+        let outcome = respond(&mut state, "y");
         let rendered = outcome.rendered().join("\n");
 
         // The small file made it; the oversize one was skipped and reported.

@@ -466,7 +466,15 @@ impl HostFilesystem {
                 )));
             }
         }
-        fs::write(&path, data)
+        // Creation must never truncate an existing destination during a copy.
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(!must_exist)
+            .truncate(must_exist)
+            .open(&path)
+            .map_err(|error| AstraError::Filesystem(format!("{}: {error}", path.display())))?;
+        std::io::Write::write_all(&mut file, data)
+            .and_then(|()| file.sync_all())
             .map_err(|error| AstraError::Filesystem(format!("{}: {error}", path.display())))?;
         self.entry(alias, relative)
     }
@@ -492,6 +500,11 @@ impl HostFilesystem {
         relative: &[String],
         new_name: &str,
     ) -> Result<HostEntry, AstraError> {
+        if relative.is_empty() {
+            return Err(AstraError::PermissionDenied(
+                "a mount root cannot be renamed".to_string(),
+            ));
+        }
         validate_windows_name(new_name)?;
         let source = self.resolve(alias, relative)?;
         if !source.exists() {
@@ -522,6 +535,11 @@ impl HostFilesystem {
         to_relative: &[String],
         copy: bool,
     ) -> Result<HostEntry, AstraError> {
+        if from_relative.is_empty() {
+            return Err(AstraError::PermissionDenied(
+                "a mount root cannot be moved or copied".to_string(),
+            ));
+        }
         let source = self.resolve(from_alias, from_relative)?;
         if !source.exists() {
             return Err(AstraError::PathNotFound(display(from_alias, from_relative)));
@@ -542,7 +560,11 @@ impl HostFilesystem {
             });
         }
         // Prevent moving a directory into itself / its own subtree.
-        if source.is_dir() && target.starts_with(&source) {
+        let canonical_source = dunce::canonicalize(&source)
+            .map_err(|error| AstraError::Filesystem(error.to_string()))?;
+        let canonical_destination = dunce::canonicalize(&destination_dir)
+            .map_err(|error| AstraError::Filesystem(error.to_string()))?;
+        if source.is_dir() && canonical_destination.starts_with(&canonical_source) {
             return Err(AstraError::InvalidMove(
                 "cannot move a directory into itself".to_string(),
             ));
@@ -683,7 +705,7 @@ fn count_into(path: &Path, files: &mut u64, folders: &mut u64) {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return;
     };
-    if metadata.is_dir() {
+    if metadata.is_dir() && !is_link_or_reparse(&metadata) {
         *folders += 1;
         if let Ok(entries) = fs::read_dir(path) {
             for entry in entries.flatten() {
@@ -696,20 +718,59 @@ fn count_into(path: &Path, files: &mut u64, folders: &mut u64) {
 }
 
 fn copy_recursive(source: &Path, target: &Path) -> Result<(), AstraError> {
+    copy_tree(source, target, 0)
+}
+
+fn is_link_or_reparse(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
+}
+
+fn copy_tree(source: &Path, target: &Path, depth: usize) -> Result<(), AstraError> {
+    if depth > 64 {
+        return Err(AstraError::InvalidMove(
+            "host copy exceeds the 64-level depth limit".to_string(),
+        ));
+    }
     let metadata = fs::symlink_metadata(source)
         .map_err(|error| AstraError::Filesystem(format!("{}: {error}", source.display())))?;
+    if is_link_or_reparse(&metadata) {
+        return Err(AstraError::PermissionDenied(
+            "recursive copies do not follow symbolic links, junctions, or reparse points"
+                .to_string(),
+        ));
+    }
     if metadata.is_dir() {
         fs::create_dir(target)
             .map_err(|error| AstraError::Filesystem(format!("{}: {error}", target.display())))?;
-        for entry in fs::read_dir(source)
-            .map_err(|error| AstraError::Filesystem(error.to_string()))?
-            .flatten()
+        for entry in
+            fs::read_dir(source).map_err(|error| AstraError::Filesystem(error.to_string()))?
         {
-            copy_recursive(&entry.path(), &target.join(entry.file_name()))?;
+            let entry = entry.map_err(|error| AstraError::Filesystem(error.to_string()))?;
+            copy_tree(&entry.path(), &target.join(entry.file_name()), depth + 1)?;
         }
-    } else {
-        fs::copy(source, target)
+    } else if metadata.is_file() {
+        let mut input = fs::File::open(source)
             .map_err(|error| AstraError::Filesystem(format!("copy failed: {error}")))?;
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(target)
+            .map_err(|error| AstraError::Filesystem(format!("copy failed: {error}")))?;
+        std::io::copy(&mut input, &mut output)
+            .and_then(|_| output.sync_all())
+            .map_err(|error| AstraError::Filesystem(format!("copy failed: {error}")))?;
+    } else {
+        return Err(AstraError::InvalidMove(
+            "host copy only accepts regular files and directories".to_string(),
+        ));
     }
     Ok(())
 }
@@ -740,7 +801,10 @@ fn search_dir(
                 kind: super::providers::ProviderKind::Host,
             });
         }
-        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+        if fs::symlink_metadata(entry.path())
+            .map(|metadata| metadata.is_dir() && !is_link_or_reparse(&metadata))
+            .unwrap_or(false)
+        {
             search_dir(&entry.path(), alias, relative, needle, depth + 1, hits);
         }
         relative.pop();
@@ -803,6 +867,72 @@ pub fn validate_windows_name(name: &str) -> Result<(), AstraError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creating_a_host_file_never_overwrites_existing_content() {
+        let (dir, host, alias) = temp_mount();
+        let relative = vec!["top level notes.txt".to_string()];
+        assert!(host
+            .write_bytes(&alias, &relative, b"replacement", false)
+            .is_err());
+        assert_eq!(
+            fs::read(dir.path().join("top level notes.txt")).unwrap(),
+            b"hello"
+        );
+        host.write_bytes(&alias, &relative, b"explicit rewrite", true)
+            .unwrap();
+        assert_eq!(
+            fs::read(dir.path().join("top level notes.txt")).unwrap(),
+            b"explicit rewrite"
+        );
+    }
+
+    #[test]
+    fn mount_roots_cannot_be_renamed_or_relocated() {
+        let (dir, host, alias) = temp_mount();
+        assert!(host.rename(&alias, &[], "renamed").is_err());
+        assert!(host
+            .relocate(&alias, &[], &alias, &["University".to_string()], false)
+            .is_err());
+        assert!(dir.path().join("top level notes.txt").exists());
+    }
+
+    #[test]
+    fn recursive_copy_preserves_an_existing_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.txt");
+        let target = dir.path().join("target.txt");
+        fs::write(&source, b"source").unwrap();
+        fs::write(&target, b"original").unwrap();
+        assert!(copy_recursive(&source, &target).is_err());
+        assert_eq!(fs::read(target).unwrap(), b"original");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn recursive_copy_refuses_a_junction_inside_the_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        fs::create_dir(&source).unwrap();
+        fs::write(outside.path().join("private.txt"), b"not part of the mount").unwrap();
+        let junction = source.join("junction");
+        let output = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(outside.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "could not create test junction");
+        let target = dir.path().join("target");
+        assert!(matches!(
+            copy_recursive(&source, &target),
+            Err(AstraError::PermissionDenied(_))
+        ));
+        assert!(!target.join("junction").join("private.txt").exists());
+        fs::remove_dir(&junction).unwrap();
+        assert!(outside.path().join("private.txt").exists());
+    }
 
     fn temp_mount() -> (tempfile::TempDir, HostFilesystem, String) {
         let dir = tempfile::tempdir().unwrap();

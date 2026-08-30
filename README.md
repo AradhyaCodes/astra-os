@@ -14,6 +14,11 @@ only through explicit, clearly-labelled bridges.
 The app uses a single-color violet **A** mark across the favicon, in-app UI,
 Windows shortcuts, and packaged application icons.
 
+Status: **pre-release educational software**. HOST commands execute real Windows
+programs and can modify real files; Astra is not a sandbox. Use a standard user
+account and disposable folders for experiments. Stable release gates are tracked
+in [the release checklist](docs/RELEASE_CHECKLIST.md).
+
 ---
 
 ## Table of contents
@@ -98,6 +103,9 @@ Windows icon files, run
 `cargo clean --manifest-path src-tauri/Cargo.toml --release` before rebuilding
 so Cargo regenerates the executable's embedded icon resource.
 
+Local and CI validation builds are unsigned unless signing is configured by the
+maintainer. Building an MSI does not make it a trusted production release.
+
 ---
 
 ## The Almanac command language
@@ -166,15 +174,22 @@ saved to `state.json` in Tauri's app-data directory
 and a backup swap so an interrupted write can recover.
 
 On the first Astra OS launch, an existing `%APPDATA%\com.aaru.os\state.json`
-profile is copied into the new app-data directory if Astra has no state yet.
+profile is validated and saved atomically into the new app-data directory if
+Astra has neither a primary snapshot nor a backup. The original is left intact.
+Only one Astra app instance is allowed to run for this application identity.
 
 Login sessions, failed-attempt counters and authenticated lock boundaries are
 **process-local** and deliberately do not survive a restart.
 
 The whole document is rewritten on every mutation, so the virtual filesystem is
 capped at 64 MiB of file content. A `state.json` that somehow grows past 96 MiB
-is set aside on boot (`state.oversized-<timestamp>.json`) and a fresh one is
-started.
+is set aside on boot (`state.json.oversized-<timestamp>.json`). The same read limit
+applies to the backup. One previous committed snapshot is retained as
+`state.json.bak`; if the primary is corrupt or oversized, recovery tries that
+backup before starting fresh. Unsupported schema versions stop startup without
+resetting the profile. Keep separate backups before upgrading.
+Loaded virtual filesystems are checked for invalid links, cycles, inconsistent
+IDs/parents, excessive depth and incorrect payload sizes before runtime use.
 
 ---
 
@@ -216,6 +231,12 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
 cargo fmt   --manifest-path src-tauri/Cargo.toml -- --check
 ```
 
+The Release checks workflow runs the frontend checks, Rust tests and Clippy,
+dependency audits, a redacted Git-history secret scan, and an unsigned Windows
+MSI build. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
+[CHANGELOG.md](CHANGELOG.md). A workflow definition is not evidence of a passing
+remote run; check the Actions result for the release commit.
+
 ---
 
 ## What Astra OS is *not*
@@ -224,9 +245,14 @@ cargo fmt   --manifest-path src-tauri/Cargo.toml -- --check
   An Astra "lock" only gates access inside Astra OS.
 - Mounted host resources are real. `destroy` previews the affected items, asks
   for confirmation, and moves them to the Windows Recycle Bin.
-- Cross-boundary `transfer` copies first and removes the source only when no
-  entries were skipped. A `HOST>` source is moved to the Recycle Bin without a
-  separate confirmation prompt.
+- Almanac asks for confirmation before a `transfer` involving HOST resources.
+  Cross-boundary transfer copies first and removes the source only when no
+  entries were skipped. A `HOST>` source is moved to the Recycle Bin.
+- New-file copies refuse existing destinations. Recursive host copies reject
+  symbolic links, junctions and reparse points. A failed multi-file copy can
+  leave a partial destination; the operation is not a cross-filesystem transaction.
+- Some registered apps/games use a process-information placeholder rather than
+  a complete application or playable game.
 - The scheduler, memory and process simulation are teaching models. Tracked
   host processes are *observed* — Windows schedules them, not Astra.
 

@@ -15,7 +15,7 @@ pub mod commands;
 pub mod almanac;
 pub mod fs_provider;
 
-// Subsystem stubs — will be fleshed out in subsequent phases
+// System subsystems
 pub mod filesystem;
 pub mod memory;
 pub mod persistence;
@@ -40,19 +40,26 @@ pub fn run() {
     log::info!("Astra OS v0.1 starting…");
 
     tauri::Builder::default()
+        // Register first: only one runtime may write this app's profile.
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             let state_path = app_data_dir.join("state.json");
-            if !state_path.exists() {
-                if let Some(parent) = app_data_dir.parent() {
-                    let legacy_state = parent.join("com.aaru.os").join("state.json");
-                    if legacy_state.exists() {
-                        std::fs::create_dir_all(&app_data_dir)?;
-                        std::fs::copy(&legacy_state, &state_path)?;
-                        log::info!("migrated the Aaru-OS profile into Astra OS");
-                    }
+            if let Some(parent) = app_data_dir.parent() {
+                let legacy_state = parent.join("com.aaru.os").join("state.json");
+                if crate::persistence::JsonPersistence::migrate_legacy_profile(
+                    &legacy_state,
+                    &state_path,
+                )? {
+                    log::info!("migrated the Aaru-OS profile into Astra OS");
                 }
             }
             let persistence = crate::persistence::JsonPersistence::new(state_path);

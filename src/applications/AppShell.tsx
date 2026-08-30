@@ -4,8 +4,8 @@ import type { PcbView } from "../types";
 
 /**
  * Generic placeholder window for built-in Astra apps and games that are
- * registered as processes but do not yet have a bespoke UI (Settings,
- * Calculator, TextEditor, ImageViewer, Snake, Pong, Minesweeper, Tetris).
+ * registered as processes but do not yet have a bespoke UI (for example,
+ * Snake, Pong, Minesweeper and Tetris). This is not a playable game surface.
  *
  * It shows the live process record so `almanac run <App>` visibly does
  * something and the simulated workload metadata is inspectable.

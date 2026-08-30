@@ -98,6 +98,11 @@ pub enum PendingPrompt {
     },
     LogoutPassword,
     KillLapsessionConfirm,
+    TransferHostConfirm {
+        cwd: String,
+        from: String,
+        to: String,
+    },
     // ---- host variants ----
     DestroyHostConfirm {
         alias: String,
@@ -129,6 +134,7 @@ impl std::fmt::Debug for PendingPrompt {
             PendingPrompt::UnlockPassword { .. } => "UnlockPassword",
             PendingPrompt::LogoutPassword => "LogoutPassword",
             PendingPrompt::KillLapsessionConfirm => "KillLapsessionConfirm",
+            PendingPrompt::TransferHostConfirm { .. } => "TransferHostConfirm",
             PendingPrompt::DestroyHostConfirm { .. } => "DestroyHostConfirm",
             PendingPrompt::HostLockPassword { .. } => "HostLockPassword",
             PendingPrompt::HostLockConfirm { .. } => "HostLockConfirm(redacted)",

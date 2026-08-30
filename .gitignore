@@ -29,7 +29,14 @@ src-tauri/target/release/bundle/
 *.key
 *.jks
 *.keystore
+*.pfx
+*.p12
 src-tauri/*.pem
+state.json
+state.json.*
+state.corrupt-*.json
+state.oversized-*.json
+security-reports/
 
 # --- Secrets / local config -------------------------------------------------
 .env
