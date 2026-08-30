@@ -36,7 +36,7 @@ trash = "5"                       # move host resources to the OS Recycle Bin
 thiserror = "2"
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.55"                   # Phase 5 — Windows "App Paths" lookup for host apps
+winreg = "0.56"                   # Phase 5 — Windows "App Paths" lookup for host apps
 
 # Logging
 log = "0.4"
